@@ -160,7 +160,7 @@ proptest! {
                 },
                 Op::Subscribe => Event::Subscribe {
                     key: k.clone(),
-                    fetcher: test_fetcher(),
+                    fetcher: Some(test_fetcher()),
                     compare: None,
                     opts: QueryOptions::default(),
                 },

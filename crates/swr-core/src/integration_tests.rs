@@ -620,3 +620,20 @@ async fn subscribe_eq_stabilizes_snapshot_arcs() {
         handle.changed().await.expect("channel open");
     }
 }
+
+/// D-32: observe() watches set()-fed keys end to end.
+#[tokio::test(start_paused = true)]
+async fn observe_watches_local_writes() {
+    let client = client();
+    client.set::<_, u32, String>("k", 1);
+
+    let mut handle = client.observe::<_, u32, String>("k", QueryOptions::default());
+    assert_eq!(handle.snapshot().data.as_deref(), Some(&1));
+
+    // Revalidation is inert without a fetcher — and must not wedge anything.
+    handle.revalidate();
+
+    client.set::<_, u32, String>("k", 2);
+    wait_for(&mut handle, 2).await;
+    assert!(!handle.snapshot().is_validating);
+}

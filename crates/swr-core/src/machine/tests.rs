@@ -118,7 +118,7 @@ impl Machine {
     fn subscribe(&mut self, key: &QueryKey, opts: QueryOptions) -> (u64, HandleOutput) {
         let out = self.handle(Event::Subscribe {
             key: key.clone(),
-            fetcher: test_fetcher(),
+            fetcher: Some(test_fetcher()),
             compare: None,
             opts,
         });
@@ -745,7 +745,7 @@ fn t17_structural_sharing_keeps_the_arc_on_equal_commits() {
     let k = key("a");
     let out = m.handle(Event::Subscribe {
         key: k.clone(),
-        fetcher: test_fetcher(),
+        fetcher: Some(test_fetcher()),
         compare: Some(erased_eq::<u32>()),
         opts: QueryOptions {
             stale_time: Duration::ZERO,
@@ -855,4 +855,37 @@ fn t19_cross_incarnation_commit_is_fenced() {
     // The new incarnation's own commit applies normally.
     m.commit_ok(&k, 1, 222);
     assert_eq!(m.data_u32(&k), Some(222));
+}
+
+/// D-32: an observer-only subscription watches without storing a fetcher;
+/// revalidation is inert (E6-1) until some call supplies one.
+#[test]
+fn t20_observer_only_subscription() {
+    let mut m = Machine::new();
+    let k = key("a");
+    m.mutate_set(&k, 7);
+
+    let out = m.handle(Event::Subscribe {
+        key: k.clone(),
+        fetcher: None,
+        compare: None,
+        opts: QueryOptions::default(),
+    });
+    let Outcome::Subscribed { .. } = out.outcome else {
+        panic!("observer subscription succeeds");
+    };
+    assert!(
+        start_fetch_seqs(&out.effects).is_empty(),
+        "nothing to fetch with"
+    );
+    assert_eq!(m.data_u32(&k), Some(7));
+
+    // E6-1: revalidation requests on a fetcher-less entry are inert.
+    let out = m.handle(Event::RevalidateRequested { key: k.clone() });
+    assert!(out.effects.is_empty());
+
+    // A read that supplies a fetcher makes revalidation live (API-2).
+    m.read(&k, ReadPolicy::CacheOnly);
+    let out = m.handle(Event::RevalidateRequested { key: k.clone() });
+    assert_eq!(start_fetch_seqs(&out.effects).len(), 1);
 }

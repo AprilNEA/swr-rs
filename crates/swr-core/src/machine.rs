@@ -54,10 +54,11 @@ pub(crate) enum Event {
         compare: Option<ErasedCompare>,
         opts: QueryOptions,
     },
-    /// A `QueryHandle` is being created.
+    /// A `QueryHandle` is being created. `fetcher: None` is an observer-only
+    /// subscription (D-32): it watches the entry without storing a fetcher.
     Subscribe {
         key: QueryKey,
-        fetcher: ErasedFetcher,
+        fetcher: Option<ErasedFetcher>,
         /// Structural-sharing comparator (D-30); a provided one replaces the
         /// stored one, `None` leaves it untouched.
         compare: Option<ErasedCompare>,
@@ -706,7 +707,7 @@ impl Inner {
     fn on_subscribe(
         &mut self,
         key: QueryKey,
-        fetcher: ErasedFetcher,
+        fetcher: Option<ErasedFetcher>,
         compare: Option<ErasedCompare>,
         opts: QueryOptions,
         now: Instant,
@@ -716,7 +717,10 @@ impl Inner {
         self.next_sub_id += 1;
         let e = self.entry_or_create(&key);
         ctx.mark_touched(&key);
-        e.fetcher = Some(fetcher);
+        // E4 preamble: last-wins only when a fetcher is provided (D-32).
+        if let Some(f) = fetcher {
+            e.fetcher = Some(f);
+        }
         if let Some(c) = compare {
             e.compare = Some(c);
         }

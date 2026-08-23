@@ -7,7 +7,7 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use tokio::sync::watch;
 
-use crate::erased::{ErasedCompare, ErasedValue, downcast_value, erased_eq};
+use crate::erased::{ErasedCompare, ErasedFetcher, ErasedValue, downcast_value, erased_eq};
 use crate::error::FetchError;
 use crate::fetcher::{self, Fetcher};
 use crate::handle::QueryHandle;
@@ -311,7 +311,27 @@ impl SwrClient {
         E: MaybeSend + MaybeSync + 'static,
         F: Fetcher<K, T, E>,
     {
-        self.subscribe_inner(key, fetcher, opts, None)
+        let query_key = key.clone().into_query_key();
+        let erased = fetcher::erase(key, fetcher);
+        self.subscribe_inner(query_key, Some(erased), opts, None)
+    }
+
+    /// Observer-only subscription (D-32): watch a key without providing a
+    /// fetcher — for entries fed purely by [`SwrClient::set`] / mutations, or
+    /// when another call site already owns the fetcher registration (API-2
+    /// last-wins makes re-supplying closures per subscription a footgun).
+    ///
+    /// While the entry has no stored fetcher, revalidation requests are inert
+    /// (E6-1) and reads without data yield
+    /// [`FetchError::NoFetcher`](crate::FetchError::NoFetcher); the first
+    /// `fetch`/`subscribe` that supplies a fetcher makes them live.
+    pub fn observe<K, T, E>(&self, key: K, opts: QueryOptions) -> QueryHandle<T, E>
+    where
+        K: IntoQueryKey<T, E>,
+        T: MaybeSend + MaybeSync + 'static,
+        E: MaybeSend + MaybeSync + 'static,
+    {
+        self.subscribe_inner(key.into_query_key(), None, opts, None)
     }
 
     /// [`SwrClient::subscribe`] with structural sharing (D-30): commits whose
@@ -331,29 +351,27 @@ impl SwrClient {
         E: MaybeSend + MaybeSync + 'static,
         F: Fetcher<K, T, E>,
     {
-        self.subscribe_inner(key, fetcher, opts, Some(erased_eq::<T>()))
+        let query_key = key.clone().into_query_key();
+        let erased = fetcher::erase(key, fetcher);
+        self.subscribe_inner(query_key, Some(erased), opts, Some(erased_eq::<T>()))
     }
 
-    fn subscribe_inner<K, T, E, F>(
+    fn subscribe_inner<T, E>(
         &self,
-        key: K,
-        fetcher: F,
+        query_key: QueryKey,
+        fetcher: Option<ErasedFetcher>,
         opts: QueryOptions,
         compare: Option<ErasedCompare>,
     ) -> QueryHandle<T, E>
     where
-        K: IntoQueryKey<T, E> + Clone + MaybeSend + MaybeSync + 'static,
         T: MaybeSend + MaybeSync + 'static,
         E: MaybeSend + MaybeSync + 'static,
-        F: Fetcher<K, T, E>,
     {
-        let query_key = key.clone().into_query_key();
-        let erased = fetcher::erase(key, fetcher);
         let outcome = Shared::dispatch(
             &self.shared,
             Event::Subscribe {
                 key: query_key.clone(),
-                fetcher: erased,
+                fetcher,
                 compare,
                 opts,
             },
