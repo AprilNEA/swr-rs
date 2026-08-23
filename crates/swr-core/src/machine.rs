@@ -250,6 +250,16 @@ impl EntryOptions {
     fn any_on_online(&self) -> bool {
         self.subs.values().any(|o| o.revalidate_on_online)
     }
+
+    /// OPT-5: min focus throttle among active subscribers (the most eager
+    /// subscriber wins, like OPT-1/OPT-3).
+    fn min_focus_throttle(&self, default_throttle: Duration) -> Duration {
+        self.subs
+            .values()
+            .map(|o| o.focus_throttle)
+            .min()
+            .unwrap_or(default_throttle)
+    }
 }
 
 /// One cache entry (spec 4.2).
@@ -272,6 +282,9 @@ struct EntryCore {
     subscribers: usize,
     gc_gen: u64,
     refresh_gen: u64,
+    /// Focus-triggered revalidation is suppressed until this instant (OPT-5,
+    /// SWR's `focusThrottleInterval`). Re-armed on each accepted focus event.
+    focus_blocked_until: Option<Instant>,
 
     // ---- behavior ----
     fetcher: Option<ErasedFetcher>,
@@ -301,6 +314,7 @@ impl EntryCore {
             subscribers: 0,
             gc_gen: 0,
             refresh_gen: 0,
+            focus_blocked_until: None,
             fetcher: None,
             opts: EntryOptions::default(),
             snap_version: 0,
@@ -313,9 +327,15 @@ impl EntryCore {
         self.fetcher.is_some() && self.mutation_active == 0 && self.inflight.is_none()
     }
 
-    /// `is_stale` (5.4).
+    /// `is_stale` (5.4). An unrepresentable deadline (`updated_at +
+    /// stale_time` overflows, e.g. `QueryOptions::immutable()`) means the
+    /// entry never goes stale by time.
     fn is_stale(&self, stale_time: Duration, now: Instant) -> bool {
-        self.invalidated || self.updated_at.is_none_or(|t| now >= t + stale_time)
+        self.invalidated
+            || self.updated_at.is_none_or(|t| {
+                t.checked_add(stale_time)
+                    .is_some_and(|deadline| now >= deadline)
+            })
     }
 
     /// `active` (5.4).
@@ -907,6 +927,7 @@ impl Inner {
     /// E13.
     fn on_broadcast(&mut self, ev: SwrEvent, now: Instant, ctx: &mut Ctx) {
         let default_stale = self.defaults.stale_time;
+        let default_throttle = self.defaults.focus_throttle;
         let keys: Vec<QueryKey> = self.entries.keys().cloned().collect();
         for key in keys {
             let e = self
@@ -924,11 +945,21 @@ impl Inner {
             if !enabled {
                 continue;
             }
+            // OPT-5 (D-27): focus events are throttled per entry; online
+            // events are not (mirrors SWR's focusThrottleInterval).
+            if ev == SwrEvent::Focus && e.focus_blocked_until.is_some_and(|until| now < until) {
+                continue;
+            }
             if !e.is_stale(e.opts.min_stale_time(default_stale), now) {
                 continue;
             }
             if e.inflight.is_some() || e.mutation_active > 0 || e.fetcher.is_none() {
                 continue;
+            }
+            if ev == SwrEvent::Focus {
+                // Re-arm the throttle window on each accepted focus event.
+                e.focus_blocked_until =
+                    now.checked_add(e.opts.min_focus_throttle(default_throttle));
             }
             ctx.mark_touched(&key);
             start_fetch(e, &key, ctx);
@@ -991,12 +1022,16 @@ impl Inner {
             };
             if e.is_quiescent() {
                 e.gc_gen += 1;
-                ctx.effects.push(Effect::ScheduleTimer {
-                    key: key.clone(),
-                    kind: TimerKind::Gc,
-                    at: now + e.opts.gc_time(default_gc),
-                    generation: e.gc_gen,
-                });
+                // An unrepresentable deadline (huge gc_time) means: never
+                // collect — skip scheduling instead of overflowing.
+                if let Some(at) = now.checked_add(e.opts.gc_time(default_gc)) {
+                    ctx.effects.push(Effect::ScheduleTimer {
+                        key: key.clone(),
+                        kind: TimerKind::Gc,
+                        at,
+                        generation: e.gc_gen,
+                    });
+                }
             }
         }
         // RF-1: reschedule when the refresh basis changed.
@@ -1006,12 +1041,16 @@ impl Inner {
                 continue;
             };
             if e.subscribers > 0 {
-                if let Some(interval) = e.opts.refresh_interval() {
+                if let Some(at) = e
+                    .opts
+                    .refresh_interval()
+                    .and_then(|interval| now.checked_add(interval))
+                {
                     e.refresh_gen += 1;
                     ctx.effects.push(Effect::ScheduleTimer {
                         key: key.clone(),
                         kind: TimerKind::Refresh,
-                        at: now + interval,
+                        at,
                         generation: e.refresh_gen,
                     });
                 }

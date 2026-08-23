@@ -7,7 +7,10 @@ runtimes and UI frameworks plug in as thin layers.
 
 The normative spec lives in [`handoff.md`](handoff.md); implementation
 deviations are tracked in its D-x table and in
-[`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md).
+[`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md). A source-verified feature matrix
+against vercel/swr is kept in [`docs/swr-parity.md`](docs/swr-parity.md) —
+including focus throttling, error retry with exponential backoff
+(`Retry`/`RetryPolicy`), and `QueryOptions::immutable()`.
 
 ## Crates
 

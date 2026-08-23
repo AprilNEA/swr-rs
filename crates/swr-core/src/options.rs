@@ -31,6 +31,10 @@ pub struct QueryOptions {
     pub revalidate_on_focus: bool,
     /// Revalidate stale entries on [`SwrEvent::Online`] broadcasts (OPT-4). Default: `true`.
     pub revalidate_on_online: bool,
+    /// Minimum spacing between focus-triggered revalidations (OPT-5; SWR's
+    /// `focusThrottleInterval`). Online broadcasts are not throttled.
+    /// Default: 5 seconds.
+    pub focus_throttle: Duration,
 }
 
 impl Default for QueryOptions {
@@ -41,6 +45,21 @@ impl Default for QueryOptions {
             refresh_interval: None,
             revalidate_on_focus: true,
             revalidate_on_online: true,
+            focus_throttle: Duration::from_secs(5),
+        }
+    }
+}
+
+impl QueryOptions {
+    /// SWR's `useSWRImmutable`: never revalidate automatically. Data counts
+    /// as fresh forever and focus/online broadcasts are ignored; manual
+    /// `revalidate()` and `invalidate()` still work.
+    pub fn immutable() -> Self {
+        Self {
+            stale_time: Duration::MAX,
+            revalidate_on_focus: false,
+            revalidate_on_online: false,
+            ..Self::default()
         }
     }
 }

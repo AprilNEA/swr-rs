@@ -457,3 +457,106 @@ async fn ensure_fresh_refetches_stale_data() {
         .expect("refetched");
     assert_eq!(*fresh, 2, "EnsureFresh never returns stale data");
 }
+
+/// D-28: the Retry combinator recovers from transient errors with
+/// exponential backoff before the flight commits.
+#[tokio::test(start_paused = true)]
+async fn retry_recovers_from_transient_errors() {
+    use crate::{ReadPolicy, Retry, RetryPolicy};
+    let client = client();
+    let calls = Arc::new(AtomicU32::new(0));
+    let flaky = {
+        let calls = Arc::clone(&calls);
+        move |_key: &'static str| {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n < 2 {
+                    Err("transient".to_string())
+                } else {
+                    Ok::<u32, String>(7)
+                }
+            }
+        }
+    };
+    let fetcher = Retry::new(
+        Arc::new(TokioTestRuntime),
+        flaky,
+        RetryPolicy {
+            interval: Duration::from_secs(1),
+            max_retries: Some(3),
+        },
+    );
+
+    let started = tokio::time::Instant::now();
+    let value = client
+        .fetch("k", fetcher, ReadPolicy::EnsureFresh)
+        .await
+        .expect("recovered after retries");
+    assert_eq!(*value, 7);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        3,
+        "initial try plus two retries"
+    );
+    // Backoff: 1s << 1 = 2s, then 1s << 2 = 4s.
+    assert!(
+        started.elapsed() >= Duration::from_secs(6),
+        "backoff delays applied"
+    );
+}
+
+/// D-28: exhausted retries surface the last error through the normal path.
+#[tokio::test(start_paused = true)]
+async fn retry_exhausts_and_surfaces_the_error() {
+    use crate::{FetchError, ReadPolicy, Retry, RetryPolicy};
+    let client = client();
+    let calls = Arc::new(AtomicU32::new(0));
+    let failing = {
+        let calls = Arc::clone(&calls);
+        move |_key: &'static str| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Err::<u32, String>("boom".to_string()))
+        }
+    };
+    let fetcher = Retry::new(
+        Arc::new(TokioTestRuntime),
+        failing,
+        RetryPolicy {
+            interval: Duration::from_millis(10),
+            max_retries: Some(2),
+        },
+    );
+
+    let result = client.fetch("k", fetcher, ReadPolicy::EnsureFresh).await;
+    match result {
+        Err(FetchError::Fetch(error)) => assert_eq!(error.as_str(), "boom"),
+        other => panic!("expected fetch error, got {other:?}"),
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        3,
+        "initial try plus two retries"
+    );
+}
+
+/// D-28: `retry_if` short-circuits non-retryable errors (SWR skips 404 the
+/// same way).
+#[tokio::test(start_paused = true)]
+async fn retry_if_skips_non_retryable_errors() {
+    use crate::{ReadPolicy, Retry, RetryPolicy};
+    let client = client();
+    let calls = Arc::new(AtomicU32::new(0));
+    let failing = {
+        let calls = Arc::clone(&calls);
+        move |_key: &'static str| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Err::<u32, String>("fatal".to_string()))
+        }
+    };
+    let fetcher = Retry::new(Arc::new(TokioTestRuntime), failing, RetryPolicy::default())
+        .retry_if(|error: &String| error != "fatal");
+
+    let result = client.fetch("k", fetcher, ReadPolicy::EnsureFresh).await;
+    assert!(result.is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "no retry for fatal errors");
+}

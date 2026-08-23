@@ -39,6 +39,7 @@ mod key;
 mod machine;
 mod marker;
 mod options;
+mod retry;
 mod runtime;
 mod snapshot;
 
@@ -58,5 +59,6 @@ pub use handle::QueryHandle;
 pub use key::{IntoKeyPrefix, IntoQueryKey, IntoSegment, IntoSegments, QueryKey, Segment};
 pub use marker::{MaybeSend, MaybeSync};
 pub use options::{MutateOptions, QueryOptions, ReadPolicy, SwrEvent};
+pub use retry::{Retry, RetryPolicy};
 pub use runtime::{Runtime, RuntimeFuture};
 pub use snapshot::{QueryState, Snapshot};

@@ -625,3 +625,101 @@ fn t14_stale_read_returns_old_value() {
         10
     );
 }
+
+/// OPT-5 / D-27: focus revalidation is throttled per entry; online events and
+/// window expiry are not affected.
+#[test]
+fn t15_focus_throttle() {
+    let mut m = Machine::new();
+    let k = key("a");
+    let eager = QueryOptions {
+        stale_time: Duration::ZERO,
+        focus_throttle: Duration::from_secs(5),
+        ..QueryOptions::default()
+    };
+    m.subscribe(&k, eager);
+    m.commit_ok(&k, 1, 1);
+
+    let out = m.handle(Event::Broadcast {
+        ev: SwrEvent::Focus,
+    });
+    assert_eq!(
+        start_fetch_seqs(&out.effects).len(),
+        1,
+        "first focus revalidates"
+    );
+    m.commit_ok(&k, 2, 2);
+
+    m.advance(Duration::from_secs(1));
+    let out = m.handle(Event::Broadcast {
+        ev: SwrEvent::Focus,
+    });
+    assert!(
+        start_fetch_seqs(&out.effects).is_empty(),
+        "focus throttled inside the window even though the entry is stale"
+    );
+
+    let out = m.handle(Event::Broadcast {
+        ev: SwrEvent::Online,
+    });
+    assert_eq!(
+        start_fetch_seqs(&out.effects).len(),
+        1,
+        "online is not throttled"
+    );
+    m.commit_ok(&k, 3, 3);
+
+    m.advance(Duration::from_secs(5));
+    let out = m.handle(Event::Broadcast {
+        ev: SwrEvent::Focus,
+    });
+    assert_eq!(
+        start_fetch_seqs(&out.effects).len(),
+        1,
+        "throttle window expired"
+    );
+}
+
+/// `QueryOptions::immutable()`: fresh forever, deaf to broadcasts, but manual
+/// revalidation still works.
+#[test]
+fn t16_immutable_options() {
+    let mut m = Machine::new();
+    let k = key("a");
+    let (_, out) = m.subscribe(&k, QueryOptions::immutable());
+    assert_eq!(
+        start_fetch_seqs(&out.effects),
+        [1],
+        "first load still happens"
+    );
+    m.commit_ok(&k, 1, 1);
+
+    m.advance(Duration::from_secs(60 * 60 * 24 * 365));
+    let out = m.handle(Event::Read {
+        key: k.clone(),
+        policy: ReadPolicy::StaleWhileRevalidate,
+        fetcher: Some(test_fetcher()),
+        opts: QueryOptions::immutable(),
+    });
+    assert!(
+        start_fetch_seqs(&out.effects).is_empty(),
+        "never stale by time"
+    );
+    assert_eq!(as_u32(ready_snapshot(&out).data.as_ref().expect("data")), 1);
+
+    let out = m.handle(Event::Broadcast {
+        ev: SwrEvent::Focus,
+    });
+    assert!(start_fetch_seqs(&out.effects).is_empty(), "focus ignored");
+    let out = m.handle(Event::Broadcast {
+        ev: SwrEvent::Online,
+    });
+    assert!(start_fetch_seqs(&out.effects).is_empty(), "online ignored");
+
+    let out = m.handle(Event::RevalidateRequested { key: k.clone() });
+    assert_eq!(
+        start_fetch_seqs(&out.effects).len(),
+        1,
+        "manual revalidate works"
+    );
+}

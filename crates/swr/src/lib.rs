@@ -30,8 +30,8 @@ use std::sync::Arc;
 pub use swr_core::{
     BoxedFuture, Closed, ErasedValue, FetchError, Fetcher, Instant, IntoKeyPrefix, IntoQueryKey,
     IntoSegment, IntoSegments, MaybeSend, MaybeSync, MutateOptions, QueryHandle, QueryKey,
-    QueryOptions, QueryState, ReadPolicy, Runtime, RuntimeFuture, Segment, Snapshot, SwrClient,
-    SwrClientBuilder, SwrEvent,
+    QueryOptions, QueryState, ReadPolicy, Retry, RetryPolicy, Runtime, RuntimeFuture, Segment,
+    Snapshot, SwrClient, SwrClientBuilder, SwrEvent,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
