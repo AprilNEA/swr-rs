@@ -1,0 +1,19 @@
+[package]
+name = "swr-reqwest"
+description = "reqwest fetchers for swr: map cache keys to HTTP requests with JSON decoding"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+swr-core.workspace = true
+# TLS backends are the application's choice; enable one via your own reqwest
+# dependency (feature unification applies it here too).
+reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
+serde = "1.0.229"
+
+[dev-dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+swr = { path = "../swr" }
+tokio = { version = "1.53.1", features = ["rt", "macros", "net", "io-util", "time"] }

@@ -16,6 +16,8 @@ deviations are tracked in its D-x table and in
 - `swr-core` — state machine, cache, and the public client API. Compiles on
   native and `wasm32-unknown-unknown`.
 - `swr-runtime-tokio` — tokio `Runtime` implementation for native targets.
+- `swr-reqwest` — reqwest fetchers: `JsonFetcher` maps cache keys to HTTP
+  requests with JSON decoding (`reqwest::Error` as the query error type).
 - `swr-runtime-web` — browser `Runtime` (`spawn_local` + `setTimeout` timers)
   plus a reference-counted focus/online event source (`WebEventSource::attach`
   forwards `focus`/`visibilitychange`/`online` to `SwrClient::broadcast`).
@@ -48,6 +50,17 @@ async fn load_user(id: u64) -> Result<String, String> {
 
 To supply your own [`Runtime`] (clock/spawn/timers), depend on `swr-core`
 plus a runtime crate directly and use `SwrClient::builder()`.
+
+Fetchers are plain closures, so any HTTP client works inline. For reqwest,
+`swr-reqwest` removes the boilerplate:
+
+```rust
+use swr_reqwest::JsonFetcher;
+
+let users: JsonFetcher<(&str, u64), User> =
+    JsonFetcher::get(http, |(_, id)| format!("https://api.example.com/users/{id}"));
+let user = client.fetch(("user", 1u64), users.clone(), ReadPolicy::StaleWhileRevalidate).await?;
+```
 
 A fuller walkthrough (caching, background refresh, optimistic mutation, prefix
 invalidation) is in `crates/swr-runtime-tokio/examples/bff.rs`:
