@@ -1,0 +1,16 @@
+[package]
+name = "swr-core"
+description = "UI-agnostic stale-while-revalidate cache core: a sans-io state machine with a thin async shell"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+parking_lot = "0.12.5"
+tokio = { version = "1.53.1", default-features = false, features = ["sync"] }
+web-time = "1.1.0"
+
+[dev-dependencies]
+proptest = "1.11.0"
+tokio = { version = "1.53.1", features = ["rt", "macros", "time", "sync", "test-util"] }
