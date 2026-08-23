@@ -27,11 +27,12 @@ jobs:
       - name: Check (native)
         run: cargo check --workspace
       - name: Check (wasm32)
-        run: cargo check -p swr-core -p swr-runtime-web --target wasm32-unknown-unknown
+        run: cargo check -p swr-core -p swr-runtime-web -p swr --target wasm32-unknown-unknown
       - name: Clippy (wasm32)
-        # swr-core lib only: its dev-dependencies (proptest) are native-only.
+        # Lib targets only for swr-core and swr: their dev-dependencies
+        # (proptest, tokio) are native-only.
         run: |
-          cargo clippy -p swr-core --target wasm32-unknown-unknown -- -D warnings
+          cargo clippy -p swr-core -p swr --target wasm32-unknown-unknown -- -D warnings
           cargo clippy -p swr-runtime-web --target wasm32-unknown-unknown --all-targets -- -D warnings
 
   wasm-test:

@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/swr-core", "crates/swr-runtime-tokio", "crates/swr-runtime-web"]
+members = [
+    "crates/swr",
+    "crates/swr-core",
+    "crates/swr-runtime-tokio",
+    "crates/swr-runtime-web",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,3 +15,5 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 swr-core = { path = "crates/swr-core", version = "0.1.0" }
+swr-runtime-tokio = { path = "crates/swr-runtime-tokio", version = "0.1.0" }
+swr-runtime-web = { path = "crates/swr-runtime-web", version = "0.1.0" }

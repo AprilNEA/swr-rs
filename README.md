@@ -11,6 +11,8 @@ deviations are tracked in its D-x table and in
 
 ## Crates
 
+- `swr` — the batteries-included entry point: re-exports the full `swr-core`
+  API and picks the default runtime per platform (`swr::client()`).
 - `swr-core` — state machine, cache, and the public client API. Compiles on
   native and `wasm32-unknown-unknown`.
 - `swr-runtime-tokio` — tokio `Runtime` implementation for native targets.
@@ -22,13 +24,11 @@ deviations are tracked in its D-x table and in
 ## Usage
 
 ```rust
-use std::sync::Arc;
-use swr_core::{ReadPolicy, SwrClient};
-use swr_runtime_tokio::TokioRuntime;
+use swr::ReadPolicy;
 
 #[tokio::main]
 async fn main() {
-    let client = SwrClient::new(Arc::new(TokioRuntime::current()));
+    let client = swr::client();
 
     let user = client
         .fetch(
@@ -45,6 +45,9 @@ async fn load_user(id: u64) -> Result<String, String> {
     Ok(format!("user-{id}"))
 }
 ```
+
+To supply your own [`Runtime`] (clock/spawn/timers), depend on `swr-core`
+plus a runtime crate directly and use `SwrClient::builder()`.
 
 A fuller walkthrough (caching, background refresh, optimistic mutation, prefix
 invalidation) is in `crates/swr-runtime-tokio/examples/bff.rs`:
