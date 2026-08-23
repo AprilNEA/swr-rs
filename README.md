@@ -23,7 +23,9 @@ including focus throttling, error retry with exponential backoff
   requests with JSON decoding (`reqwest::Error` as the query error type).
 - `swr-ureq` — the same for the blocking ureq client, bridged onto
   per-request worker threads (runtime-agnostic; `ureq::Error` as the query
-  error type).
+  error type). This worker-thread + oneshot bridge is the general answer for
+  any blocking fetcher (API-4/D-26) — `Runtime` deliberately has no
+  `spawn_blocking`, which would tie the core to tokio.
 - `swr-runtime-web` — browser `Runtime` (`spawn_local` + `setTimeout` timers)
   plus a reference-counted focus/online event source (`WebEventSource::attach`
   forwards `focus`/`visibilitychange`/`online` to `SwrClient::broadcast`).

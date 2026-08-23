@@ -709,3 +709,55 @@ async fn dependent_queries_fetch_through_a_weak_client() {
         "cache freed; no fetcher-held cycle"
     );
 }
+
+/// D-34: multi-key observation needs no core combinator — boxed `changed()`
+/// futures multiplex in one task, and their cancel safety means re-creating
+/// them each round loses no notifications.
+#[tokio::test(start_paused = true)]
+async fn multiplexing_changed_futures_in_one_task() {
+    use std::task::Poll;
+
+    let client = client();
+    for i in 0..3u64 {
+        client.set::<_, u32, String>(("dev", i), 0);
+    }
+    let mut handles: Vec<QueryHandle<u32, String>> = (0..3u64)
+        .map(|i| client.observe(("dev", i), QueryOptions::default()))
+        .collect();
+
+    tokio::spawn({
+        let client = client.clone();
+        async move {
+            for i in 0..3u64 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                #[allow(clippy::cast_possible_truncation, reason = "test values fit in u32")]
+                client.set::<_, u32, String>(("dev", i), i as u32 + 1);
+            }
+        }
+    });
+
+    let mut seen = [0u32; 3];
+    while seen.contains(&0) {
+        {
+            // Hand-rolled select-any over boxed changed() futures; the
+            // borrows end with this block, before the snapshots below.
+            let mut races: Vec<_> = handles.iter_mut().map(|h| Box::pin(h.changed())).collect();
+            std::future::poll_fn(|cx| {
+                for race in &mut races {
+                    if let Poll::Ready(result) = race.as_mut().poll(cx) {
+                        return Poll::Ready(result);
+                    }
+                }
+                Poll::Pending
+            })
+            .await
+            .expect("channels open");
+        }
+        for (i, handle) in handles.iter().enumerate() {
+            if let Some(value) = handle.snapshot().data.as_deref() {
+                seen[i] = *value;
+            }
+        }
+    }
+    assert_eq!(seen, [1, 2, 3]);
+}

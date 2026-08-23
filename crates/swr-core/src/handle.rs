@@ -56,6 +56,15 @@ where
     ///
     /// Returns `Err(Closed)` once the entry has been garbage-collected;
     /// re-subscribe to keep observing the key.
+    ///
+    /// Observing many keys (D-34): one task per handle is the intended
+    /// baseline. To multiplex N handles in a single task, race their
+    /// `changed()` futures — they are cancel-safe (nothing is marked seen
+    /// unless the future completes), so dropping and re-creating them each
+    /// round loses no notifications. `tokio::select!` covers fixed sets;
+    /// for dynamic N, box the futures and race them with
+    /// `futures::future::select_all` or a small `poll_fn` loop, then re-read
+    /// `snapshot()` on whichever woke.
     pub async fn changed(&mut self) -> Result<(), Closed> {
         self.rx.changed().await.map_err(|_| Closed)
     }
