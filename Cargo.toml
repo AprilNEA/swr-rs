@@ -6,6 +6,7 @@ members = [
     "crates/swr-reqwest",
     "crates/swr-runtime-tokio",
     "crates/swr-runtime-web",
+    "crates/swr-ureq",
 ]
 
 [workspace.package]

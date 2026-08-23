@@ -1,0 +1,22 @@
+[package]
+name = "swr-ureq"
+description = "ureq fetchers for swr: blocking HTTP exchanges bridged onto per-request worker threads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+swr-core.workspace = true
+serde = "1.0.229"
+# `sync` only, for the oneshot bridging worker threads to the async side;
+# stays runtime-agnostic (same policy as swr-core).
+tokio = { version = "1.53.1", default-features = false, features = ["sync"] }
+# TLS backends are the application's choice; enable one via your own ureq
+# dependency (feature unification applies it here too).
+ureq = { version = "3.4.0", default-features = false, features = ["json"] }
+
+[dev-dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+swr = { path = "../swr" }
+tokio = { version = "1.53.1", features = ["rt", "macros", "net", "io-util", "time"] }
