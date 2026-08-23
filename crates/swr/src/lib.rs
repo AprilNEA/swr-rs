@@ -1,10 +1,24 @@
 //! Stale-while-revalidate async cache for Rust.
 //!
 //! This is the batteries-included entry point: the whole [`swr_core`] public
-//! API re-exported, plus the default runtime for each platform — tokio on
-//! native targets, the browser event loop on `wasm32`. Depend on `swr-core`
-//! and a runtime crate directly instead if you need to supply your own
-//! [`Runtime`].
+//! API re-exported, with runtimes and integrations behind feature flags:
+//!
+//! | Feature | Default | Provides |
+//! |---|---|---|
+//! | `tokio` | yes | [`TokioRuntime`] on native targets; [`client()`] / [`default_runtime()`] |
+//! | `web` | yes | `WebRuntime` + `WebEventSource` on wasm32; [`client()`] / [`default_runtime()`] |
+//! | `reqwest` | no | reqwest fetchers as [`mod@reqwest`] (native targets) |
+//! | `ureq` | no | ureq fetchers as [`mod@ureq`] (native targets) |
+//! | `gpui` | no | the GPUI adapter as [`mod@gpui`] (native targets) |
+//!
+//! A GPUI app that brings no tokio disables the defaults:
+//!
+//! ```toml
+//! swr = { version = "0.1", default-features = false, features = ["gpui"] }
+//! ```
+//!
+//! and builds its client with `swr::gpui::client(cx)`. To supply your own
+//! [`Runtime`], depend on `swr-core` directly instead.
 //!
 //! ```
 //! # #[tokio::main(flavor = "current_thread")]
@@ -25,6 +39,10 @@
 //! ```
 #![deny(missing_docs)]
 
+#[cfg(any(
+    all(feature = "tokio", not(target_arch = "wasm32")),
+    all(feature = "web", target_arch = "wasm32")
+))]
 use std::sync::Arc;
 
 pub use swr_core::{
@@ -34,19 +52,38 @@ pub use swr_core::{
     Snapshot, SwrClient, SwrClientBuilder, SwrEvent, WeakSwrClient,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
 pub use swr_runtime_tokio::TokioRuntime;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub use swr_runtime_web::{WebEventSource, WebRuntime};
 
+/// reqwest fetchers: `JsonFetcher` maps cache keys to HTTP requests with JSON
+/// decoding (`reqwest::Error` as the query error type).
+#[cfg(all(feature = "reqwest", not(target_arch = "wasm32")))]
+pub use swr_reqwest as reqwest;
+
+/// ureq fetchers: blocking HTTP exchanges bridged onto per-request worker
+/// threads (`ureq::Error` as the query error type).
+#[cfg(all(feature = "ureq", not(target_arch = "wasm32")))]
+pub use swr_ureq as ureq;
+
+/// GPUI adapter: `GpuiRuntime` runs fetches and timers on GPUI's executors,
+/// and `Query` bridges watch changes into entity notifications. Build clients
+/// with `swr::gpui::client(cx)`.
+#[cfg(all(feature = "gpui", not(target_arch = "wasm32")))]
+pub use swr_gpui as gpui;
+
 /// The default [`Runtime`] for this platform: [`TokioRuntime`] on native
-/// targets, [`WebRuntime`] on `wasm32`. Pass it to
-/// [`SwrClientBuilder::build`] when combining custom [`QueryOptions`]
-/// defaults with the platform runtime.
+/// targets, `WebRuntime` on wasm32. Pass it to [`SwrClientBuilder::build`]
+/// when combining custom [`QueryOptions`] defaults with the platform runtime.
 ///
 /// # Panics
 ///
 /// On native targets, panics when called outside a tokio runtime context.
+#[cfg(any(
+    all(feature = "tokio", not(target_arch = "wasm32")),
+    all(feature = "web", target_arch = "wasm32")
+))]
 pub fn default_runtime() -> Arc<dyn Runtime> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -61,17 +98,22 @@ pub fn default_runtime() -> Arc<dyn Runtime> {
 /// Create an [`SwrClient`] with default options on the platform's default
 /// runtime (see [`default_runtime`]).
 ///
-/// On `wasm32`, pair it with [`WebEventSource::attach`] to revalidate on
-/// browser focus/online events.
+/// On `wasm32`, pair it with `WebEventSource::attach` to revalidate on
+/// browser focus/online events. In a GPUI app, use `swr::gpui::client(cx)`
+/// instead.
 ///
 /// # Panics
 ///
 /// On native targets, panics when called outside a tokio runtime context.
+#[cfg(any(
+    all(feature = "tokio", not(target_arch = "wasm32")),
+    all(feature = "web", target_arch = "wasm32")
+))]
 pub fn client() -> SwrClient {
     SwrClient::new(default_runtime())
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "tokio", not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

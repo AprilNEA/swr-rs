@@ -22,5 +22,8 @@ categories = ["caching", "asynchronous"]
 
 [workspace.dependencies]
 swr-core = { path = "crates/swr-core", version = "0.1.0" }
+swr-gpui = { path = "crates/swr-gpui", version = "0.1.1" }
+swr-reqwest = { path = "crates/swr-reqwest", version = "0.1.0" }
 swr-runtime-tokio = { path = "crates/swr-runtime-tokio", version = "0.1.0" }
 swr-runtime-web = { path = "crates/swr-runtime-web", version = "0.1.0" }
+swr-ureq = { path = "crates/swr-ureq", version = "0.1.0" }

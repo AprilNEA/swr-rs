@@ -8,7 +8,11 @@ runtimes and UI frameworks plug in as thin layers.
 ## Crates
 
 - `swr` — the batteries-included entry point: re-exports the full `swr-core`
-  API and picks the default runtime per platform (`swr::client()`).
+  API and picks the default runtime per platform (`swr::client()`). The
+  runtimes and integrations below are also available through its feature
+  flags: `tokio` + `web` (default), `reqwest`, `ureq`, `gpui` — e.g. a GPUI
+  app uses `swr = { default-features = false, features = ["gpui"] }` and
+  `swr::gpui::client(cx)`, with no tokio anywhere.
 - `swr-core` — state machine, cache, and the public client API. Compiles on
   native and `wasm32-unknown-unknown`.
 - `swr-runtime-tokio` — tokio `Runtime` implementation for native targets.
@@ -58,11 +62,11 @@ To supply your own [`Runtime`] (clock/spawn/timers), depend on `swr-core`
 plus a runtime crate directly and use `SwrClient::builder()`.
 
 Fetchers are plain closures, so any HTTP client works inline. For reqwest
-(`swr-reqwest`) and ureq (`swr-ureq`, same shape), the integration crates
+(feature `reqwest`) and ureq (feature `ureq`, same shape), the integrations
 remove the boilerplate:
 
 ```rust
-use swr_reqwest::JsonFetcher;
+use swr::reqwest::JsonFetcher;
 
 let users: JsonFetcher<(&str, u64), User> =
     JsonFetcher::get(http, |(_, id)| format!("https://api.example.com/users/{id}"));

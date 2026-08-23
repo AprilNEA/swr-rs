@@ -1,7 +1,7 @@
 [package]
 name = "swr"
-description = "Stale-while-revalidate async cache for Rust: the swr-core API plus the default runtime for each platform"
-version.workspace = true
+description = "Stale-while-revalidate async cache for Rust: the swr-core API plus runtimes and integrations behind feature flags"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -10,14 +10,31 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["tokio", "web"]
+# Tokio runtime on native targets; provides swr::client() / swr::default_runtime().
+tokio = ["dep:swr-runtime-tokio"]
+# Browser runtime and focus/online event source on wasm32; provides
+# swr::client() / swr::default_runtime() there.
+web = ["dep:swr-runtime-web"]
+# reqwest fetchers, re-exported as swr::reqwest (native targets).
+reqwest = ["dep:swr-reqwest"]
+# ureq fetchers, re-exported as swr::ureq (native targets).
+ureq = ["dep:swr-ureq"]
+# GPUI adapter, re-exported as swr::gpui (native targets).
+gpui = ["dep:swr-gpui"]
+
 [dependencies]
 swr-core.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-swr-runtime-tokio.workspace = true
+swr-gpui = { workspace = true, optional = true }
+swr-reqwest = { workspace = true, optional = true }
+swr-runtime-tokio = { workspace = true, optional = true }
+swr-ureq = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-swr-runtime-web.workspace = true
+swr-runtime-web = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1.53.1", features = ["rt", "macros", "time", "test-util"] }
