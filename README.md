@@ -5,11 +5,6 @@ semantics of [SWR](https://swr.vercel.app) and TanStack Query. The core is a
 headless `SwrClient` over a pure synchronous state machine (sans-io); async
 runtimes and UI frameworks plug in as thin layers.
 
-A source-verified feature matrix against vercel/swr is kept in
-[`docs/swr-parity.md`](docs/swr-parity.md) — including focus throttling,
-error retry with exponential backoff (`Retry`/`RetryPolicy`), and
-`QueryOptions::immutable()`.
-
 ## Crates
 
 - `swr` — the batteries-included entry point: re-exports the full `swr-core`
