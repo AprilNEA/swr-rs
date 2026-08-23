@@ -148,6 +148,26 @@ impl SwrClientBuilder {
     }
 }
 
+/// Weak counterpart of [`SwrClient`] (D-33, API-3).
+///
+/// Dependent-query fetchers — fetchers that call back into the client for
+/// other keys — must capture this instead of a strong client: fetchers are
+/// stored inside the cache, so a strong capture would form a reference cycle
+/// (`Shared → fetcher → Shared`) keeping the whole cache and its timers alive
+/// after the last external client drops.
+#[derive(Clone)]
+pub struct WeakSwrClient {
+    shared: Weak<Shared>,
+}
+
+impl WeakSwrClient {
+    /// Upgrade to a usable client. `None` once every strong [`SwrClient`]
+    /// has been dropped.
+    pub fn upgrade(&self) -> Option<SwrClient> {
+        self.shared.upgrade().map(|shared| SwrClient { shared })
+    }
+}
+
 /// Outcome of one pass through the wait loop (5.6).
 enum WaitOutcome {
     Data(ErasedValue),
@@ -164,6 +184,18 @@ impl SwrClient {
     /// Start building a client with custom defaults.
     pub fn builder() -> SwrClientBuilder {
         SwrClientBuilder::default()
+    }
+
+    /// A weak handle for dependent-query fetchers (D-33, API-3): fetchers
+    /// that fetch other keys capture this and [`upgrade`](WeakSwrClient::upgrade)
+    /// per call. The dependency graph between keys must stay acyclic — a key
+    /// that (transitively) fetches itself parks as a never-completing flight
+    /// (the core does not detect cycles; caller timeouts are the backstop,
+    /// WAIT-3).
+    pub fn downgrade(&self) -> WeakSwrClient {
+        WeakSwrClient {
+            shared: Arc::downgrade(&self.shared),
+        }
     }
 
     /// One-shot read (the headless main interface). Behavior per

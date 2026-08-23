@@ -637,3 +637,75 @@ async fn observe_watches_local_writes() {
     wait_for(&mut handle, 2).await;
     assert!(!handle.snapshot().is_validating);
 }
+
+/// D-33 / API-3: dependent queries — a fetcher fetches another key through a
+/// weak client; the shared index is deduplicated across dependents, and the
+/// weak capture leaves no reference cycle behind.
+#[tokio::test(start_paused = true)]
+async fn dependent_queries_fetch_through_a_weak_client() {
+    let client = client();
+    let index_calls = Arc::new(AtomicU32::new(0));
+    let weak = client.downgrade();
+
+    let item_fetcher = {
+        let index_calls = Arc::clone(&index_calls);
+        let weak = weak.clone();
+        move |(_, id): (&'static str, u64)| {
+            let weak = weak.clone();
+            let index_calls = Arc::clone(&index_calls);
+            async move {
+                let client = weak.upgrade().ok_or_else(|| "client gone".to_string())?;
+                let index = client
+                    .fetch(
+                        ("assets", "index"),
+                        {
+                            let index_calls = Arc::clone(&index_calls);
+                            move |_key: (&'static str, &'static str)| {
+                                let index_calls = Arc::clone(&index_calls);
+                                async move {
+                                    index_calls.fetch_add(1, Ordering::SeqCst);
+                                    Ok::<Vec<u64>, String>(vec![10, 20, 30])
+                                }
+                            }
+                        },
+                        ReadPolicy::StaleWhileRevalidate,
+                    )
+                    .await
+                    .map_err(|e| format!("index failed: {e}"))?;
+                index
+                    .iter()
+                    .find(|item| **item == id)
+                    .copied()
+                    .ok_or_else(|| "missing".to_string())
+            }
+        }
+    };
+
+    let first = client
+        .fetch(
+            ("asset", 10u64),
+            item_fetcher.clone(),
+            ReadPolicy::EnsureFresh,
+        )
+        .await
+        .expect("item 10");
+    assert_eq!(*first, 10);
+    let second = client
+        .fetch(("asset", 20u64), item_fetcher, ReadPolicy::EnsureFresh)
+        .await
+        .expect("item 20");
+    assert_eq!(*second, 20);
+    assert_eq!(
+        index_calls.load(Ordering::SeqCst),
+        1,
+        "the index is fetched once and shared across dependents"
+    );
+
+    // The weak capture forms no cycle: dropping the last strong client frees
+    // the cache even though entries still store the dependent fetcher.
+    drop(client);
+    assert!(
+        weak.upgrade().is_none(),
+        "cache freed; no fetcher-held cycle"
+    );
+}

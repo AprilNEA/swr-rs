@@ -51,7 +51,7 @@ mod integration_tests;
 /// backed by the Performance API.
 pub use web_time::Instant;
 
-pub use client::{SwrClient, SwrClientBuilder};
+pub use client::{SwrClient, SwrClientBuilder, WeakSwrClient};
 pub use erased::{BoxedFuture, ErasedValue};
 pub use error::{Closed, FetchError};
 pub use fetcher::Fetcher;
