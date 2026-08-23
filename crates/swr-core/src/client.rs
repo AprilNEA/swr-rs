@@ -513,12 +513,15 @@ impl SwrClient {
         T: 'static,
         E: 'static,
     {
-        Shared::dispatch(
-            &self.shared,
-            Event::RevalidateRequested {
-                key: key.into_query_key(),
-            },
-        );
+        self.revalidate_key(key.into_query_key());
+    }
+
+    /// [`revalidate`](SwrClient::revalidate) for an already-built
+    /// [`QueryKey`] (D-36) — for adapters and callers that only hold the
+    /// erased key. Safe without type parameters: revalidation never touches
+    /// typed values.
+    pub fn revalidate_key(&self, key: QueryKey) {
+        Shared::dispatch(&self.shared, Event::RevalidateRequested { key });
     }
 
     /// Feed an environment event (browser focus, connectivity, ...) from the
