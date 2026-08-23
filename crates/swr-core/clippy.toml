@@ -1,0 +1,5 @@
+# RT-1: all instants must come from Runtime::now() so tests can inject a clock.
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "RT-1: take time via Runtime::now() so tests can inject a mock clock" },
+    { path = "web_time::Instant::now", reason = "RT-1: take time via Runtime::now() so tests can inject a mock clock" },
+]

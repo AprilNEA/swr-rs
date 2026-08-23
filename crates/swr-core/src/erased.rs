@@ -36,6 +36,7 @@ pub(crate) type ErasedFetcher =
 
 /// TE-1: downcast at the typed boundary. The `(T, E)` type id is part of the
 /// key (K-1), so a mismatch is impossible without an internal bug.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn downcast_value<T>(value: ErasedValue) -> Arc<T>
 where
     T: MaybeSend + MaybeSync + 'static,
@@ -43,4 +44,24 @@ where
     value
         .downcast::<T>()
         .unwrap_or_else(|_| panic!("swr-core internal bug (TE-1): erased value type mismatch"))
+}
+
+/// TE-1: downcast at the typed boundary. The `(T, E)` type id is part of the
+/// key (K-1), so a mismatch is impossible without an internal bug.
+///
+/// `std` provides `Arc::downcast` only for `dyn Any + Send + Sync`, so the
+/// wasm variant re-implements it over `Arc<dyn Any>`.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn downcast_value<T>(value: ErasedValue) -> Arc<T>
+where
+    T: MaybeSend + MaybeSync + 'static,
+{
+    assert!(
+        value.is::<T>(),
+        "swr-core internal bug (TE-1): erased value type mismatch"
+    );
+    let ptr = Arc::into_raw(value).cast::<T>();
+    // SAFETY: `is::<T>()` above proved the erased pointee is exactly a `T`,
+    // and `from_raw` re-adopts the refcount `into_raw` handed over.
+    unsafe { Arc::from_raw(ptr) }
 }
