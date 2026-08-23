@@ -71,12 +71,16 @@ pub(crate) enum Event {
     /// A fetch task finished successfully.
     CommitOk {
         key: QueryKey,
+        /// Entry incarnation the flight belongs to (SEQ-5, D-31).
+        incarnation: u64,
         seq: u64,
         value: ErasedValue,
     },
     /// A fetch task failed.
     CommitErr {
         key: QueryKey,
+        /// Entry incarnation the flight belongs to (SEQ-5, D-31).
+        incarnation: u64,
         seq: u64,
         error: ErasedValue,
     },
@@ -119,6 +123,8 @@ pub(crate) enum Effect {
     /// as `CommitOk`/`CommitErr` (D-3).
     StartFetch {
         key: QueryKey,
+        /// Entry incarnation, echoed back by the commit events (SEQ-5).
+        incarnation: u64,
         seq: u64,
         fetcher: ErasedFetcher,
     },
@@ -270,6 +276,12 @@ impl EntryOptions {
 
 /// One cache entry (spec 4.2).
 struct EntryCore {
+    /// Distinguishes this entry from earlier incarnations under the same key
+    /// (SEQ-5, D-31): per-entry seqs restart at 0 after GC removal, so a
+    /// discarded old-incarnation flight could otherwise alias a new flight's
+    /// seq and commit into the wrong incarnation.
+    incarnation: u64,
+
     // ---- values ----
     data: Option<ErasedValue>,
     error: Option<ErasedValue>,
@@ -307,9 +319,10 @@ struct EntryCore {
 }
 
 impl EntryCore {
-    fn new() -> Self {
+    fn new(incarnation: u64) -> Self {
         let (tx, _rx) = watch::channel(Snapshot::empty());
         Self {
+            incarnation,
             data: None,
             error: None,
             data_seq: 0,
@@ -410,6 +423,7 @@ fn start_fetch(e: &mut EntryCore, key: &QueryKey, ctx: &mut Ctx) -> u64 {
         .expect("start_fetch! precondition: fetcher present");
     ctx.effects.push(Effect::StartFetch {
         key: key.clone(),
+        incarnation: e.incarnation,
         seq: e.seq,
         fetcher,
     });
@@ -454,6 +468,8 @@ pub(crate) struct Inner {
     entries: HashMap<QueryKey, EntryCore>,
     defaults: QueryOptions,
     next_sub_id: u64,
+    /// Incarnation counter for newly created entries (SEQ-5).
+    next_incarnation: u64,
 }
 
 impl Inner {
@@ -462,6 +478,7 @@ impl Inner {
             entries: HashMap::new(),
             defaults,
             next_sub_id: 0,
+            next_incarnation: 0,
         }
     }
 
@@ -492,12 +509,22 @@ impl Inner {
                 self.on_revalidate_requested(&key, &mut ctx);
                 Outcome::None
             }
-            Event::CommitOk { key, seq, value } => {
-                self.on_commit_ok(&key, seq, value, now, &mut ctx);
+            Event::CommitOk {
+                key,
+                incarnation,
+                seq,
+                value,
+            } => {
+                self.on_commit_ok(&key, incarnation, seq, value, now, &mut ctx);
                 Outcome::None
             }
-            Event::CommitErr { key, seq, error } => {
-                self.on_commit_err(&key, seq, error, &mut ctx);
+            Event::CommitErr {
+                key,
+                incarnation,
+                seq,
+                error,
+            } => {
+                self.on_commit_err(&key, incarnation, seq, error, &mut ctx);
                 Outcome::None
             }
             Event::MutateSet { key, value } => {
@@ -547,6 +574,17 @@ impl Inner {
         }
     }
 
+    /// Fetch-or-create with a fresh incarnation on insert (SEQ-5).
+    fn entry_or_create(&mut self, key: &QueryKey) -> &mut EntryCore {
+        if !self.entries.contains_key(key) {
+            let incarnation = self.next_incarnation;
+            self.next_incarnation += 1;
+            self.entries
+                .insert(key.clone(), EntryCore::new(incarnation));
+        }
+        self.entries.get_mut(key).expect("just ensured above")
+    }
+
     /// E1 / E2 / E3.
     #[allow(
         clippy::too_many_arguments,
@@ -580,10 +618,7 @@ impl Inner {
         }
 
         // E2/E3 preamble: create if missing; fetcher last-wins; record read opts.
-        let e = self
-            .entries
-            .entry(key.clone())
-            .or_insert_with(EntryCore::new);
+        let e = self.entry_or_create(&key);
         if let Some(f) = fetcher {
             e.fetcher = Some(f);
         }
@@ -679,10 +714,7 @@ impl Inner {
     ) -> Outcome {
         let sub_id = self.next_sub_id;
         self.next_sub_id += 1;
-        let e = self
-            .entries
-            .entry(key.clone())
-            .or_insert_with(EntryCore::new);
+        let e = self.entry_or_create(&key);
         ctx.mark_touched(&key);
         e.fetcher = Some(fetcher);
         if let Some(c) = compare {
@@ -746,6 +778,7 @@ impl Inner {
     fn on_commit_ok(
         &mut self,
         key: &QueryKey,
+        incarnation: u64,
         seq: u64,
         value: ErasedValue,
         now: Instant,
@@ -755,6 +788,11 @@ impl Inner {
         let Some(e) = self.entries.get_mut(key) else {
             return;
         };
+        // E7-0 / SEQ-5: a flight from an earlier incarnation of this key must
+        // not alias the rebuilt entry's seq space (D-31).
+        if e.incarnation != incarnation {
+            return;
+        }
         // E7-2: mutations veto every fetch commit (SEQ-2, D-6).
         if e.mutation_active > 0 {
             return;
@@ -794,11 +832,21 @@ impl Inner {
     }
 
     /// E8.
-    fn on_commit_err(&mut self, key: &QueryKey, seq: u64, error: ErasedValue, ctx: &mut Ctx) {
-        // E8-1..3: same three drop guards as E7.
+    fn on_commit_err(
+        &mut self,
+        key: &QueryKey,
+        incarnation: u64,
+        seq: u64,
+        error: ErasedValue,
+        ctx: &mut Ctx,
+    ) {
+        // E8-1..3: same guards as E7, including the incarnation fence (E8-0).
         let Some(e) = self.entries.get_mut(key) else {
             return;
         };
+        if e.incarnation != incarnation {
+            return;
+        }
         if e.mutation_active > 0 {
             return;
         }
@@ -816,10 +864,7 @@ impl Inner {
 
     /// E9.
     fn on_mutate_set(&mut self, key: QueryKey, value: ErasedValue, now: Instant, ctx: &mut Ctx) {
-        let e = self
-            .entries
-            .entry(key.clone())
-            .or_insert_with(EntryCore::new);
+        let e = self.entry_or_create(&key);
         ctx.mark_touched(&key);
         // E9-1.
         e.local_write(value, now);
@@ -834,10 +879,7 @@ impl Inner {
         optimistic: Option<ErasedValue>,
         ctx: &mut Ctx,
     ) -> Outcome {
-        let e = self
-            .entries
-            .entry(key.clone())
-            .or_insert_with(EntryCore::new);
+        let e = self.entry_or_create(&key);
         ctx.mark_touched(&key);
         // E10-1: the is_mutating flip must notify — wait loops depend on it (5.6).
         e.mutation_active += 1;

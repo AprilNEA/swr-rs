@@ -41,7 +41,12 @@ impl Shared {
     fn run_effects(shared: &Arc<Self>, effects: Vec<Effect>) {
         for effect in effects {
             match effect {
-                Effect::StartFetch { key, seq, fetcher } => {
+                Effect::StartFetch {
+                    key,
+                    incarnation,
+                    seq,
+                    fetcher,
+                } => {
                     // D-3: detached — the fetch outlives its callers and
                     // commits to the cache even if every waiter is dropped.
                     let weak = Arc::downgrade(shared);
@@ -49,8 +54,18 @@ impl Shared {
                         let result = fetcher(key.clone()).await;
                         let Some(shared) = weak.upgrade() else { return };
                         let ev = match result {
-                            Ok(value) => Event::CommitOk { key, seq, value },
-                            Err(error) => Event::CommitErr { key, seq, error },
+                            Ok(value) => Event::CommitOk {
+                                key,
+                                incarnation,
+                                seq,
+                                value,
+                            },
+                            Err(error) => Event::CommitErr {
+                                key,
+                                incarnation,
+                                seq,
+                                error,
+                            },
                         };
                         Shared::dispatch(&shared, ev);
                     }));

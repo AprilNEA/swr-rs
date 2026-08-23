@@ -141,17 +141,27 @@ impl Machine {
         })
     }
 
+    /// The current incarnation of `key`'s entry (0 for a missing entry, so
+    /// commits to removed entries exercise the E7-1 guard, not E7-0).
+    fn incarnation(&self, key: &QueryKey) -> u64 {
+        self.inner.entries.get(key).map_or(0, |e| e.incarnation)
+    }
+
     fn commit_ok(&mut self, key: &QueryKey, seq: u64, v: u32) -> HandleOutput {
+        let incarnation = self.incarnation(key);
         self.handle(Event::CommitOk {
             key: key.clone(),
+            incarnation,
             seq,
             value: val(v),
         })
     }
 
     fn commit_err(&mut self, key: &QueryKey, seq: u64, msg: &str) -> HandleOutput {
+        let incarnation = self.incarnation(key);
         self.handle(Event::CommitErr {
             key: key.clone(),
+            incarnation,
             seq,
             error: err(msg),
         })
@@ -798,4 +808,51 @@ fn t18_no_comparator_replaces_the_arc() {
         "no comparator: the new Arc replaces the old one"
     );
     assert_eq!(e.data_seq, 2);
+}
+
+/// SEQ-5 / D-31: after GC removal and rebuild, a commit from the previous
+/// incarnation is fenced even when its seq aliases the new flight's seq.
+#[test]
+fn t19_cross_incarnation_commit_is_fenced() {
+    let mut m = Machine::new();
+    let k = key("a");
+
+    // Incarnation A: start flight seq 1, then a local write discards it —
+    // the fetch task keeps running detached.
+    let out = m.read(&k, ReadPolicy::StaleWhileRevalidate);
+    assert_eq!(start_fetch_seqs(&out.effects), [1]);
+    let old_incarnation = m.incarnation(&k);
+    let out = m.mutate_set(&k, 7);
+    // Entry is quiescent now; GC fires and removes it.
+    let (_, generation) = timers(&out.effects, TimerKind::Gc)[0];
+    m.advance(Duration::from_secs(301));
+    m.handle(Event::TimerFired {
+        key: k.clone(),
+        kind: TimerKind::Gc,
+        generation,
+    });
+    assert!(!m.inner.entries.contains_key(&k), "entry collected");
+
+    // Incarnation B: rebuilt entry restarts its seq space at 1.
+    let out = m.read(&k, ReadPolicy::StaleWhileRevalidate);
+    assert_eq!(start_fetch_seqs(&out.effects), [1], "seq space restarted");
+    let new_incarnation = m.incarnation(&k);
+    assert_ne!(old_incarnation, new_incarnation);
+
+    // The old incarnation's flight commits with the aliasing seq: fenced.
+    let out = m.handle(Event::CommitOk {
+        key: k.clone(),
+        incarnation: old_incarnation,
+        seq: 1,
+        value: val(111),
+    });
+    assert!(
+        out.effects.is_empty(),
+        "cross-incarnation commit dropped (E7-0)"
+    );
+    assert_eq!(m.data_u32(&k), None, "stale value must not land");
+
+    // The new incarnation's own commit applies normally.
+    m.commit_ok(&k, 1, 222);
+    assert_eq!(m.data_u32(&k), Some(222));
 }

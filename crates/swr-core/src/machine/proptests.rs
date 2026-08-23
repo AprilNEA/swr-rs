@@ -136,7 +136,7 @@ proptest! {
         let mut inner = Inner::new(QueryOptions::default());
         let mut now = Instant::now();
         let k = key();
-        let mut pending_fetches: Vec<u64> = Vec::new();
+        let mut pending_fetches: Vec<(u64, u64)> = Vec::new();
         let mut subs: Vec<u64> = Vec::new();
         let mut tokens: Vec<MutationToken> = Vec::new();
         let flags = |rollback_on_error, populate, revalidate| MutateFlags {
@@ -170,28 +170,40 @@ proptest! {
                 },
                 Op::Revalidate => Event::RevalidateRequested { key: k.clone() },
                 Op::CommitPending { pick: p, ok } => match pick(&mut pending_fetches, p) {
-                    Some(seq) if ok => Event::CommitOk {
+                    Some((incarnation, seq)) if ok => Event::CommitOk {
                         key: k.clone(),
+                        incarnation,
                         seq,
                         value: Arc::new(0u32),
                     },
-                    Some(seq) => Event::CommitErr {
+                    Some((incarnation, seq)) => Event::CommitErr {
                         key: k.clone(),
+                        incarnation,
                         seq,
                         error: Arc::new("e".to_string()),
                     },
                     None => continue,
                 },
                 Op::CommitJunk { seq, ok } => {
-                    // Junk commits must not alias a live flight: SEQ-2 is about
-                    // stale seqs, not about forged current ones.
-                    if pending_fetches.contains(&seq) {
+                    // Junk commits must not alias a live flight: SEQ-2/SEQ-5
+                    // are about stale identities, not forged current ones.
+                    if pending_fetches.iter().any(|(_, s)| *s == seq) {
                         continue;
                     }
                     if ok {
-                        Event::CommitOk { key: k.clone(), seq, value: Arc::new(0u32) }
+                        Event::CommitOk {
+                            key: k.clone(),
+                            incarnation: u64::from(seq as u32 % 3),
+                            seq,
+                            value: Arc::new(0u32),
+                        }
                     } else {
-                        Event::CommitErr { key: k.clone(), seq, error: Arc::new("e".to_string()) }
+                        Event::CommitErr {
+                            key: k.clone(),
+                            incarnation: u64::from(seq as u32 % 3),
+                            seq,
+                            error: Arc::new("e".to_string()),
+                        }
                     }
                 }
                 Op::MutateSet(v) => Event::MutateSet { key: k.clone(), value: Arc::new(v) },
@@ -248,8 +260,11 @@ proptest! {
                 _ => {}
             }
             for effect in &out.effects {
-                if let Effect::StartFetch { seq, .. } = effect {
-                    pending_fetches.push(*seq);
+                if let Effect::StartFetch {
+                    incarnation, seq, ..
+                } = effect
+                {
+                    pending_fetches.push((*incarnation, *seq));
                 }
             }
             check_invariants(&inner);
