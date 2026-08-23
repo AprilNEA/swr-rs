@@ -21,11 +21,12 @@ jobs:
       - name: Format
         run: cargo fmt --check
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        # swr-gpui builds on the macOS job (gpui needs platform toolchains).
+        run: cargo clippy --workspace --exclude swr-gpui --all-targets -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude swr-gpui
       - name: Check (native)
-        run: cargo check --workspace
+        run: cargo check --workspace --exclude swr-gpui
       - name: Check (wasm32)
         run: cargo check -p swr-core -p swr-runtime-web -p swr --target wasm32-unknown-unknown
       - name: Clippy (wasm32)
@@ -48,3 +49,17 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Run wasm tests (headless Chrome)
         run: wasm-pack test --headless --chrome crates/swr-runtime-web
+
+  gpui:
+    name: swr-gpui (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy -p swr-gpui --all-targets -- -D warnings
+      - name: Test
+        run: cargo test -p swr-gpui

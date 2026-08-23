@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/swr",
     "crates/swr-core",
+    "crates/swr-gpui",
     "crates/swr-reqwest",
     "crates/swr-runtime-tokio",
     "crates/swr-runtime-web",

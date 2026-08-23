@@ -26,6 +26,11 @@ including focus throttling, error retry with exponential backoff
   error type). This worker-thread + oneshot bridge is the general answer for
   any blocking fetcher (API-4/D-26) — `Runtime` deliberately has no
   `spawn_blocking`, which would tie the core to tokio.
+- `swr-gpui` — [GPUI](https://crates.io/crates/gpui) adapter (M7): `GpuiRuntime`
+  runs fetches/timers on GPUI's executors (no tokio needed; virtual-clock
+  test support via `advance_clock`), and `Query` bridges watch changes into
+  an entity that views observe and read lock-free during render. See
+  `crates/swr-gpui/examples/status.rs`.
 - `swr-runtime-web` — browser `Runtime` (`spawn_local` + `setTimeout` timers)
   plus a reference-counted focus/online event source (`WebEventSource::attach`
   forwards `focus`/`visibilitychange`/`online` to `SwrClient::broadcast`).
