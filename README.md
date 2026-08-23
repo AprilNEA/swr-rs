@@ -5,12 +5,10 @@ semantics of [SWR](https://swr.vercel.app) and TanStack Query. The core is a
 headless `SwrClient` over a pure synchronous state machine (sans-io); async
 runtimes and UI frameworks plug in as thin layers.
 
-The normative spec lives in [`handoff.md`](handoff.md); implementation
-deviations are tracked in its D-x table and in
-[`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md). A source-verified feature matrix
-against vercel/swr is kept in [`docs/swr-parity.md`](docs/swr-parity.md) —
-including focus throttling, error retry with exponential backoff
-(`Retry`/`RetryPolicy`), and `QueryOptions::immutable()`.
+A source-verified feature matrix against vercel/swr is kept in
+[`docs/swr-parity.md`](docs/swr-parity.md) — including focus throttling,
+error retry with exponential backoff (`Retry`/`RetryPolicy`), and
+`QueryOptions::immutable()`.
 
 ## Crates
 
@@ -24,9 +22,9 @@ including focus throttling, error retry with exponential backoff
 - `swr-ureq` — the same for the blocking ureq client, bridged onto
   per-request worker threads (runtime-agnostic; `ureq::Error` as the query
   error type). This worker-thread + oneshot bridge is the general answer for
-  any blocking fetcher (API-4/D-26) — `Runtime` deliberately has no
+  any blocking fetcher — `Runtime` deliberately has no
   `spawn_blocking`, which would tie the core to tokio.
-- `swr-gpui` — [GPUI](https://crates.io/crates/gpui) adapter (M7): `GpuiRuntime`
+- `swr-gpui` — [GPUI](https://crates.io/crates/gpui) adapter: `GpuiRuntime`
   runs fetches/timers on GPUI's executors (no tokio needed; virtual-clock
   test support via `advance_clock`), and `Query` bridges watch changes into
   an entity that views observe and read lock-free during render. See
@@ -90,7 +88,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo check -p swr-core -p swr-runtime-web --target wasm32-unknown-unknown
 
-# wasm smoke tests (IT5); needs wasm-bindgen-cli matching the locked
+# wasm smoke tests; needs wasm-bindgen-cli matching the locked
 # wasm-bindgen version, plus Node for smoke.rs / a browser for browser.rs
 CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
   cargo test -p swr-runtime-web --target wasm32-unknown-unknown --test smoke

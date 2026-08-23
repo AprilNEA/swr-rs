@@ -1,11 +1,11 @@
 //! Error retry with exponential backoff — SWR's `shouldRetryOnError` /
 //! `errorRetryInterval` / `errorRetryCount`, provided as a [`Fetcher`]
-//! combinator per spec §13 (retry stays out of the state machine).
+//! combinator (retry stays out of the state machine).
 //!
-//! Divergences from SWR's default `onErrorRetry` (D-28): the backoff is the
+//! Divergences from SWR's default `onErrorRetry`: the backoff is the
 //! deterministic midpoint of SWR's jittered schedule, retries are not gated
 //! on document visibility (headless), and the default retry count is finite —
-//! a retrying flight keeps its entry's GC deferred (GC-1), so unlimited
+//! a retrying flight keeps its entry's GC deferred, so unlimited
 //! retries against a dead endpoint would pin the entry forever.
 
 use std::sync::Arc;
@@ -55,7 +55,7 @@ impl RetryPolicy {
 /// The whole retry loop runs inside one flight, so the entry stays
 /// `is_validating` throughout and concurrent readers keep deduplicating onto
 /// it. Local writes and invalidations still interrupt it: they discard the
-/// flight (SEQ-3/D-5) and its eventual result is dropped.
+/// flight and its eventual result is dropped.
 pub struct Retry<F, E> {
     inner: Arc<F>,
     runtime: Arc<dyn Runtime>,
@@ -65,7 +65,7 @@ pub struct Retry<F, E> {
 
 impl<F, E> Retry<F, E> {
     /// Wrap `inner`, retrying every error per `policy`. The runtime supplies
-    /// the backoff timer (RT-1).
+    /// the backoff timer.
     pub fn new(runtime: Arc<dyn Runtime>, inner: F, policy: RetryPolicy) -> Self {
         Self {
             inner: Arc::new(inner),

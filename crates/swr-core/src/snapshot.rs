@@ -1,4 +1,4 @@
-//! Externally visible entry state (spec 4.4): the erased [`Snapshot`] carried
+//! Externally visible entry state: the erased [`Snapshot`] carried
 //! by the watch channel, and its typed view [`QueryState`].
 
 use std::fmt;
@@ -8,29 +8,29 @@ use crate::Instant;
 use crate::erased::{ErasedValue, downcast_value};
 use crate::marker::{MaybeSend, MaybeSync};
 
-/// Type-erased, watch-channel-visible state of one entry (spec 4.4).
+/// Type-erased, watch-channel-visible state of one entry.
 ///
-/// Reading a snapshot never touches the state machine lock (SNAP-1).
+/// Reading a snapshot never touches the state machine lock.
 #[derive(Clone)]
 pub struct Snapshot {
     /// Current data, if any.
     pub data: Option<ErasedValue>,
-    /// Latest fetch error, if any. May coexist with `data` (SNAP-2, D-10).
+    /// Latest fetch error, if any. May coexist with `data`.
     pub error: Option<ErasedValue>,
     /// Seq that produced `data`.
     pub data_seq: u64,
-    /// Seq of the latest fetch `CommitErr`. Mutation errors never set this (WAIT-4).
+    /// Seq of the latest fetch `CommitErr`. Mutation errors never set this.
     pub error_seq: u64,
     /// Seq of the in-flight request, if any.
     pub inflight: Option<u64>,
     /// Whether an async mutation is in progress.
     pub is_mutating: bool,
     /// Instant of the last authoritative write to `data` (commit or populate;
-    /// optimistic writes do not move it, D-7).
+    /// optimistic writes do not move it).
     pub updated_at: Option<Instant>,
     /// Monotonic notification version. Guards the watch channel against a
-    /// stale `Notify` overtaking a newer one across batches (see EFF-2 note in
-    /// the client shell).
+    /// stale `Notify` overtaking a newer one across batches (see the notify
+    /// version guard in the client shell).
     pub(crate) version: u64,
 }
 
@@ -74,11 +74,11 @@ impl fmt::Debug for Snapshot {
     }
 }
 
-/// Typed view of a [`Snapshot`] (spec 4.4).
+/// Typed view of a [`Snapshot`].
 pub struct QueryState<T, E> {
     /// Current data.
     pub data: Option<Arc<T>>,
-    /// Latest fetch error. May coexist with `data` (SNAP-2).
+    /// Latest fetch error. May coexist with `data`.
     pub error: Option<Arc<E>>,
     /// First load: no data yet and a request in flight.
     pub is_loading: bool,
@@ -104,7 +104,7 @@ where
     }
 }
 
-// Manual impl: `Arc` clones must not require `T: Clone` (TE-2).
+// Manual impl: `Arc` clones must not require `T: Clone`.
 impl<T, E> Clone for QueryState<T, E> {
     fn clone(&self) -> Self {
         Self {

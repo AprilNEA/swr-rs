@@ -1,5 +1,4 @@
-//! Browser implementation of the [`swr_core::Runtime`] trait (spec chapter 8,
-//! M6): tasks run on the browser event loop via `spawn_local`, timers via
+//! Browser implementation of the [`swr_core::Runtime`] trait: tasks run on the browser event loop via `spawn_local`, timers via
 //! `gloo-timers`, time via the Performance API (`web_time`), plus a shared,
 //! reference-counted focus/online event source forwarding DOM events to
 //! [`SwrClient::broadcast`].
@@ -30,7 +29,7 @@ impl WebRuntime {
 impl Runtime for WebRuntime {
     fn now(&self) -> Instant {
         // web_time::Instant: Performance-API-backed on wasm (the std version
-        // would panic here, spec chapter 8).
+        // would panic here).
         Instant::now()
     }
 
@@ -47,7 +46,7 @@ impl Runtime for WebRuntime {
     }
 }
 
-/// RAII registration forwarding browser events to a client (spec chapter 8):
+/// RAII registration forwarding browser events to a client:
 /// window `focus` and `visibilitychange`-to-visible become
 /// [`SwrEvent::Focus`], window `online` becomes [`SwrEvent::Online`].
 ///

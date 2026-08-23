@@ -1,5 +1,5 @@
-//! M3–M5 integration tests (spec 9.2): the async shell on a paused tokio
-//! clock. IT1–IT4 plus subscribe/GC/refresh and mutation end-to-end paths.
+//! Integration tests: the async shell on a paused tokio clock — read
+//! policies, subscribe/GC/refresh timers, and mutation end-to-end paths.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -49,11 +49,11 @@ async fn wait_for(handle: &mut QueryHandle<u32, String>, want: u32) {
     }
 }
 
-/// IT1: an EnsureFresh waiter survives a mutation discarding its flight — the
-/// E11 step-4 notify wakes it, it pokes a fresh flight, and returns
-/// (WAIT-1/WAIT-2).
+/// An EnsureFresh waiter survives a mutation discarding its flight — the
+/// mutation-finished notify wakes it, it pokes a fresh flight, and returns
+///.
 #[tokio::test(start_paused = true)]
-async fn it1_wait_loop_survives_mutation_interrupt() {
+async fn wait_loop_survives_mutation_interrupt() {
     let client = client();
     let calls = Arc::new(AtomicU32::new(0));
     let fetcher = {
@@ -97,10 +97,10 @@ async fn it1_wait_loop_survives_mutation_interrupt() {
     assert_eq!(*value, 2, "waiter converges on the poked flight");
 }
 
-/// IT2: an entry GC'd mid-wait closes the channel; the waiter re-issues the
-/// read against the rebuilt entry with a fresh target (5.6 ★).
+/// An entry GC'd mid-wait closes the channel; the waiter re-issues the
+/// read against the rebuilt entry with a fresh target.
 #[tokio::test(start_paused = true)]
-async fn it2_closed_channel_self_heals() {
+async fn closed_channel_self_heals() {
     let client = client();
     let calls = Arc::new(AtomicU32::new(0));
     let fetcher = {
@@ -137,10 +137,10 @@ async fn it2_closed_channel_self_heals() {
     );
 }
 
-/// IT3: SWR end-to-end — stale read returns the old value immediately, the
+/// SWR end-to-end — stale read returns the old value immediately, the
 /// background refresh lands, and a subscriber observes the new value.
 #[tokio::test(start_paused = true)]
-async fn it3_swr_end_to_end() {
+async fn swr_end_to_end() {
     let client = client();
     let calls = Arc::new(AtomicU32::new(0));
 
@@ -177,10 +177,10 @@ async fn it3_swr_end_to_end() {
     assert!(state.error.is_none());
 }
 
-/// IT4: the fetch task is detached from its caller — a timed-out `fetch()`
-/// still commits to the cache (D-3).
+/// The fetch task is detached from its caller — a timed-out `fetch()`
+/// still commits to the cache.
 #[tokio::test(start_paused = true)]
-async fn it4_detached_fetch_commits_after_caller_timeout() {
+async fn detached_fetch_commits_after_caller_timeout() {
     let client = client();
     let fetcher = |_key: &'static str| async {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -194,7 +194,7 @@ async fn it4_detached_fetch_commits_after_caller_timeout() {
     .await;
     assert!(
         timed_out.is_err(),
-        "caller gave up (WAIT-3: timeouts belong to the caller)"
+        "caller gave up (timeouts belong to the caller)"
     );
 
     tokio::time::sleep(Duration::from_secs(10)).await;
@@ -206,8 +206,8 @@ async fn it4_detached_fetch_commits_after_caller_timeout() {
     assert_eq!(*cached, 7);
 }
 
-/// M4: dropping the last handle starts the GC countdown; reads keep the entry
-/// alive; expiry removes it (GC-1, E14).
+/// Dropping the last handle starts the GC countdown; reads keep the entry
+/// alive; expiry removes it.
 #[tokio::test(start_paused = true)]
 async fn gc_collects_after_unsubscribe() {
     let client = SwrClient::builder()
@@ -246,8 +246,8 @@ async fn gc_collects_after_unsubscribe() {
     );
 }
 
-/// M4: refresh ticks at the min subscriber interval and stops once the last
-/// subscriber leaves (OPT-3, RF-1, E15).
+/// Refresh ticks at the min subscriber interval and stops once the last
+/// subscriber leaves.
 #[tokio::test(start_paused = true)]
 async fn refresh_ticks_while_subscribed() {
     let client = client();
@@ -279,8 +279,8 @@ async fn refresh_ticks_while_subscribed() {
     );
 }
 
-/// M5: optimistic value is visible while the mutation runs and rolls back on
-/// error (E10/E11, SEQ-4).
+/// Optimistic value is visible while the mutation runs and rolls back on
+/// error.
 #[tokio::test(start_paused = true)]
 async fn mutate_optimistic_rollback_end_to_end() {
     let client = client();
@@ -330,7 +330,7 @@ async fn mutate_optimistic_rollback_end_to_end() {
     assert_eq!(*rolled_back, 1);
 }
 
-/// M5: a populate mutation writes its result; the caller gets the same Arc.
+/// A populate mutation writes its result; the caller gets the same Arc.
 #[tokio::test(start_paused = true)]
 async fn mutate_populate_writes_result() {
     let client = client();
@@ -357,8 +357,8 @@ async fn mutate_populate_writes_result() {
     assert_eq!(*cached, 10);
 }
 
-/// M5: a dropped mutate future aborts the mutation instead of wedging the
-/// entry (cancel safety; OPEN_QUESTIONS Q-2).
+/// A dropped mutate future aborts the mutation instead of wedging the
+/// entry (cancel safety).
 #[tokio::test(start_paused = true)]
 async fn cancelled_mutation_releases_the_entry() {
     let client = client();
@@ -394,7 +394,7 @@ async fn cancelled_mutation_releases_the_entry() {
     assert_eq!(*value, 1);
 }
 
-/// TE-1/TE-2 (M2): identical segments under different value types are distinct
+/// Identical segments under different value types are distinct
 /// entries; typed reads downcast safely on both.
 #[tokio::test(start_paused = true)]
 async fn same_segments_different_types_are_distinct_entries() {
@@ -458,7 +458,7 @@ async fn ensure_fresh_refetches_stale_data() {
     assert_eq!(*fresh, 2, "EnsureFresh never returns stale data");
 }
 
-/// D-28: the Retry combinator recovers from transient errors with
+/// The Retry combinator recovers from transient errors with
 /// exponential backoff before the flight commits.
 #[tokio::test(start_paused = true)]
 async fn retry_recovers_from_transient_errors() {
@@ -505,7 +505,7 @@ async fn retry_recovers_from_transient_errors() {
     );
 }
 
-/// D-28: exhausted retries surface the last error through the normal path.
+/// Exhausted retries surface the last error through the normal path.
 #[tokio::test(start_paused = true)]
 async fn retry_exhausts_and_surfaces_the_error() {
     use crate::{FetchError, ReadPolicy, Retry, RetryPolicy};
@@ -539,7 +539,7 @@ async fn retry_exhausts_and_surfaces_the_error() {
     );
 }
 
-/// D-28: `retry_if` short-circuits non-retryable errors (SWR skips 404 the
+/// `retry_if` short-circuits non-retryable errors (SWR skips 404 the
 /// same way).
 #[tokio::test(start_paused = true)]
 async fn retry_if_skips_non_retryable_errors() {
@@ -561,7 +561,7 @@ async fn retry_if_skips_non_retryable_errors() {
     assert_eq!(calls.load(Ordering::SeqCst), 1, "no retry for fatal errors");
 }
 
-/// D-30 / CMP-1 (b): an equal commit must still wake EnsureFresh waiters —
+/// An equal commit must still wake EnsureFresh waiters —
 /// structural sharing keeps the Arc but never suppresses the notify.
 #[tokio::test(start_paused = true)]
 async fn equal_commit_still_wakes_ensure_fresh_waiters() {
@@ -583,7 +583,7 @@ async fn equal_commit_still_wakes_ensure_fresh_waiters() {
         client.fetch_eq("k", constant, ReadPolicy::EnsureFresh),
     )
     .await
-    .expect("waiter woken by the equal commit (CMP-1)")
+    .expect("waiter woken by the equal commit")
     .expect("refresh succeeds");
 
     assert!(
@@ -592,7 +592,7 @@ async fn equal_commit_still_wakes_ensure_fresh_waiters() {
     );
 }
 
-/// D-30: subscribe_eq exposes the stable Arc through snapshots, giving
+/// subscribe_eq exposes the stable Arc through snapshots, giving
 /// subscribers an O(1) no-change check.
 #[tokio::test(start_paused = true)]
 async fn subscribe_eq_stabilizes_snapshot_arcs() {
@@ -621,7 +621,7 @@ async fn subscribe_eq_stabilizes_snapshot_arcs() {
     }
 }
 
-/// D-32: observe() watches set()-fed keys end to end.
+/// observe() watches set()-fed keys end to end.
 #[tokio::test(start_paused = true)]
 async fn observe_watches_local_writes() {
     let client = client();
@@ -638,7 +638,7 @@ async fn observe_watches_local_writes() {
     assert!(!handle.snapshot().is_validating);
 }
 
-/// D-33 / API-3: dependent queries — a fetcher fetches another key through a
+/// Dependent queries — a fetcher fetches another key through a
 /// weak client; the shared index is deduplicated across dependents, and the
 /// weak capture leaves no reference cycle behind.
 #[tokio::test(start_paused = true)]
@@ -710,7 +710,7 @@ async fn dependent_queries_fetch_through_a_weak_client() {
     );
 }
 
-/// D-34: multi-key observation needs no core combinator — boxed `changed()`
+/// Multi-key observation needs no core combinator — boxed `changed()`
 /// futures multiplex in one task, and their cancel safety means re-creating
 /// them each round loses no notifications.
 #[tokio::test(start_paused = true)]

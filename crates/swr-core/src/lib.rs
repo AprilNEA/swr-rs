@@ -1,8 +1,8 @@
 //! UI-agnostic stale-while-revalidate cache core.
 //!
 //! All SWR semantics — deduplication, race resolution, staleness, optimistic
-//! updates, GC — live in one pure synchronous state machine (D-1); a thin
-//! async shell executes its effects. See `handoff.md` for the normative spec.
+//! updates, GC — live in one pure synchronous state machine; a thin
+//! async shell executes its effects.
 //!
 //! ```no_run
 //! # async fn demo(runtime: std::sync::Arc<dyn swr_core::Runtime>) {
@@ -25,7 +25,7 @@
     target_arch = "wasm32",
     allow(
         clippy::arc_with_non_send_sync,
-        reason = "wasm is single-threaded: MaybeSend deliberately relaxes Send there (spec 3.2), \
+        reason = "wasm is single-threaded: MaybeSend deliberately relaxes Send there, \
                   and Arc keeps one code path across native and wasm targets"
     )
 )]
@@ -46,7 +46,7 @@ mod snapshot;
 #[cfg(test)]
 mod integration_tests;
 
-/// The one `Instant` used across the library (spec 3.2). On native targets it
+/// The one `Instant` used across the library. On native targets it
 /// is a zero-cost re-export of [`std::time::Instant`]; on `wasm32` it is
 /// backed by the Performance API.
 pub use web_time::Instant;

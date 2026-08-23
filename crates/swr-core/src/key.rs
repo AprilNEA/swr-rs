@@ -1,7 +1,7 @@
-//! Structured cache keys (spec 4.1).
+//! Structured cache keys.
 //!
-//! An entry's identity is the pair `(type_id, segments)` (K-1). Prefix
-//! invalidation matches only the segments and ignores the type id (K-2), so
+//! An entry's identity is the pair `(type_id, segments)`. Prefix
+//! invalidation matches only the segments and ignores the type id, so
 //! `invalidate(["user"])` hits entries of every value type under that prefix.
 
 use std::any::TypeId;
@@ -23,15 +23,15 @@ pub enum Segment {
     Bytes(Arc<[u8]>),
 }
 
-/// Structured cache key: value-type pair id plus ordered segments (spec 4.1).
+/// Structured cache key: value-type pair id plus ordered segments.
 ///
-/// K-1: identity is full equality of `(type_id, segments)`. The same segments
+/// Identity is full equality of `(type_id, segments)`. The same segments
 /// under different value types are different — and mutually safe — entries.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct QueryKey {
-    /// `TypeId` of the value pair `(T, E)`; guarantees downcasts never fail (TE-1).
+    /// `TypeId` of the value pair `(T, E)`; guarantees downcasts never fail.
     type_id: TypeId,
-    /// Structured segments; prefix matching operates on these (K-2).
+    /// Structured segments; prefix matching operates on these.
     segments: Arc<[Segment]>,
 }
 
@@ -49,7 +49,7 @@ impl QueryKey {
         &self.segments
     }
 
-    /// K-2: prefix match on segments only; the type id is ignored.
+    /// Prefix match on segments only; the type id is ignored.
     pub(crate) fn matches_prefix(&self, prefix: &[Segment]) -> bool {
         self.segments.len() >= prefix.len() && self.segments[..prefix.len()] == *prefix
     }
@@ -181,7 +181,7 @@ impl_tuple_segments!(A, B, C, D, E, F);
 impl_tuple_segments!(A, B, C, D, E, F, G);
 impl_tuple_segments!(A, B, C, D, E, F, G, H);
 
-/// K-3: user-side key construction, binding segments to the value types `(T, E)`.
+/// User-side key construction, binding segments to the value types `(T, E)`.
 pub trait IntoQueryKey<T: 'static, E: 'static> {
     /// Performs the conversion.
     fn into_query_key(self) -> QueryKey;
@@ -193,7 +193,7 @@ impl<T: 'static, E: 'static, K: IntoSegments> IntoQueryKey<T, E> for K {
     }
 }
 
-/// A key prefix for [`SwrClient::invalidate`](crate::SwrClient::invalidate) (K-2).
+/// A key prefix for [`SwrClient::invalidate`](crate::SwrClient::invalidate).
 pub trait IntoKeyPrefix {
     /// Performs the conversion.
     fn into_prefix(self) -> Vec<Segment>;

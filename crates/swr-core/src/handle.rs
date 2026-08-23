@@ -1,4 +1,4 @@
-//! [`QueryHandle`]: the RAII subscription handle (spec 7.2).
+//! [`QueryHandle`]: the RAII subscription handle.
 
 use std::marker::PhantomData;
 use std::sync::Weak;
@@ -45,7 +45,7 @@ where
         }
     }
 
-    /// The current state. Synchronous and lock-free (SNAP-1): render paths are
+    /// The current state. Synchronous and lock-free: render paths are
     /// never blocked by the state machine.
     pub fn snapshot(&self) -> QueryState<T, E> {
         QueryState::from_snapshot(self.rx.borrow().clone())
@@ -57,7 +57,7 @@ where
     /// Returns `Err(Closed)` once the entry has been garbage-collected;
     /// re-subscribe to keep observing the key.
     ///
-    /// Observing many keys (D-34): one task per handle is the intended
+    /// Observing many keys: one task per handle is the intended
     /// baseline. To multiplex N handles in a single task, race their
     /// `changed()` futures — they are cancel-safe (nothing is marked seen
     /// unless the future completes), so dropping and re-creating them each
@@ -69,7 +69,7 @@ where
         self.rx.changed().await.map_err(|_| Closed)
     }
 
-    /// Request a revalidation (E6; deduplicated against in-flight requests).
+    /// Request a revalidation (deduplicated against in-flight requests).
     pub fn revalidate(&self) {
         if let Some(shared) = self.shared.upgrade() {
             Shared::dispatch(

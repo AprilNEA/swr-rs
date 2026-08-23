@@ -1,4 +1,4 @@
-//! IT5 (spec 9.2): wasm smoke test — the core's fetch/subscribe/snapshot path
+//! Wasm smoke test — the core's fetch/subscribe/snapshot path
 //! on the browser event loop. Environment-agnostic (runs under Node or a
 //! browser); the DOM event source is covered in `browser.rs`.
 #![cfg(target_arch = "wasm32")]

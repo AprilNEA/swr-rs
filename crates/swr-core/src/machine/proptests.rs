@@ -1,9 +1,8 @@
-//! M1 property tests (spec 9.1): random event sequences preserve the seq
-//! invariants. Debug assertions inside `handle` (INV-A and friends) run as
-//! part of every case.
+//! Property tests: random event sequences preserve the seq invariants.
+//! Debug assertions inside `handle` run as part of every case.
 #![allow(
     clippy::disallowed_methods,
-    reason = "tests construct base instants directly; RT-1 applies to library code"
+    reason = "tests construct base instants directly; the Runtime::now rule applies to library code"
 )]
 
 use std::sync::Arc;
@@ -185,7 +184,7 @@ proptest! {
                     None => continue,
                 },
                 Op::CommitJunk { seq, ok } => {
-                    // Junk commits must not alias a live flight: SEQ-2/SEQ-5
+                    // Junk commits must not alias a live flight: the drop guards
                     // are about stale identities, not forged current ones.
                     if pending_fetches.iter().any(|(_, s)| *s == seq) {
                         continue;

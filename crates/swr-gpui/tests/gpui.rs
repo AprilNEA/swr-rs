@@ -1,4 +1,4 @@
-//! M7 adapter tests on GPUI's deterministic test executor: the Runtime wiring
+//! Adapter tests on GPUI's deterministic test executor: the Runtime wiring
 //! (fetch, virtual-clock timers) and the Query → entity bridge.
 
 use std::sync::Arc;
@@ -119,7 +119,7 @@ async fn query_bridges_changes_into_entity_state(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update(|cx| assert_eq!(query.read(cx).data.as_deref(), Some(&42)));
 
-    // revalidate() works from the erased key (D-36).
+    // revalidate() works from the erased key.
     query.revalidate();
     cx.run_until_parked();
     cx.update(|cx| assert_eq!(query.read(cx).data.as_deref(), Some(&2)));
@@ -135,7 +135,7 @@ async fn dropping_the_query_unsubscribes(cx: &mut TestAppContext) {
             "k",
             counting_fetcher(&calls),
             QueryOptions {
-                // OPT-2 takes the max across subscribers and touches; the
+                // gc_time aggregates as the max across subscribers and touches; the
                 // default 300s would out-vote the client's 5s default.
                 gc_time: Duration::from_secs(5),
                 ..QueryOptions::default()

@@ -1,4 +1,4 @@
-//! BFF-style example (spec M5): cache a slow upstream behind
+//! BFF-style example: cache a slow upstream behind
 //! stale-while-revalidate, then demonstrate subscriptions, optimistic
 //! mutations, and prefix invalidation.
 //!

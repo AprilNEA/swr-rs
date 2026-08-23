@@ -16,7 +16,7 @@ async fn main() {
         .unwrap();
     println!("fetched: {user}");
 
-    // Local writes are authoritative (D-7) and served straight from the cache.
+    // Local writes are authoritative and served straight from the cache.
     client.set::<_, String, String>(("user", 1u64), "user-1 (renamed)".to_string());
     let user = client
         .fetch(("user", 1u64), fetch_user, ReadPolicy::CacheOnly)

@@ -1,10 +1,9 @@
-//! The sans-io state machine `Inner` (spec chapter 5, rules in chapter 6).
+//! The sans-io state machine `Inner`.
 //!
 //! `Inner` is pure and synchronous: events in, state changes plus [`Effect`]s
 //! out. It never awaits, spawns, runs callbacks, or sends on the watch channel
 //! — the async shell in [`crate::client`] executes the effects outside the
-//! lock (LOCK-1..LOCK-3). Guards are annotated `// E7-3`-style, linking back to
-//! the transition tables in `handoff.md`.
+//! lock.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,12 +22,12 @@ mod proptests;
 #[cfg(test)]
 mod tests;
 
-/// Timer classes scheduled by the machine (5.2).
+/// Timer classes scheduled by the machine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TimerKind {
-    /// Entry removal countdown (GC-1 / E14).
+    /// Entry removal countdown.
     Gc,
-    /// Background refresh tick (RF-1 / E15).
+    /// Background refresh tick.
     Refresh,
 }
 
@@ -37,42 +36,42 @@ pub(crate) enum TimerKind {
 pub(crate) struct MutationToken {
     pub key: QueryKey,
     /// Seq consumed by this mutation's optimistic write, if it made one.
-    /// Rollback compares `data_seq` against it (SEQ-4).
+    /// Rollback compares `data_seq` against it.
     pub written_seq: Option<u64>,
 }
 
-/// Input events (5.2).
+/// Input events.
 pub(crate) enum Event {
     /// The read path of `fetch()`. A provided fetcher replaces the stored one
-    /// (last-wins, API-2).
+    /// (last-wins).
     Read {
         key: QueryKey,
         policy: ReadPolicy,
         fetcher: Option<ErasedFetcher>,
-        /// Structural-sharing comparator (D-30); a provided one replaces the
+        /// Structural-sharing comparator; a provided one replaces the
         /// stored one, `None` leaves it untouched.
         compare: Option<ErasedCompare>,
         opts: QueryOptions,
     },
     /// A `QueryHandle` is being created. `fetcher: None` is an observer-only
-    /// subscription (D-32): it watches the entry without storing a fetcher.
+    /// subscription: it watches the entry without storing a fetcher.
     Subscribe {
         key: QueryKey,
         fetcher: Option<ErasedFetcher>,
-        /// Structural-sharing comparator (D-30); a provided one replaces the
+        /// Structural-sharing comparator; a provided one replaces the
         /// stored one, `None` leaves it untouched.
         compare: Option<ErasedCompare>,
         opts: QueryOptions,
     },
     /// A `QueryHandle` was dropped. `sub_id` identifies which subscriber's
-    /// options leave the aggregate (OPT-*).
+    /// options leave the aggregate.
     Unsubscribe { key: QueryKey, sub_id: u64 },
     /// Manual revalidation (`handle.revalidate()` / `client.revalidate(key)`).
     RevalidateRequested { key: QueryKey },
     /// A fetch task finished successfully.
     CommitOk {
         key: QueryKey,
-        /// Entry incarnation the flight belongs to (SEQ-5, D-31).
+        /// Entry incarnation the flight belongs to.
         incarnation: u64,
         seq: u64,
         value: ErasedValue,
@@ -80,7 +79,7 @@ pub(crate) enum Event {
     /// A fetch task failed.
     CommitErr {
         key: QueryKey,
-        /// Entry incarnation the flight belongs to (SEQ-5, D-31).
+        /// Entry incarnation the flight belongs to.
         incarnation: u64,
         seq: u64,
         error: ErasedValue,
@@ -100,16 +99,16 @@ pub(crate) enum Event {
     },
     /// The `mutate()` future was dropped before completion. Releases
     /// `mutation_active` and rolls back like the error path, without writing
-    /// an error (cancel safety; see OPEN_QUESTIONS Q-2).
+    /// an error (cancel safety).
     MutateAbort {
         token: MutationToken,
         flags: MutateFlags,
     },
-    /// Prefix invalidation (K-2).
+    /// Prefix invalidation.
     Invalidate { prefix: Vec<Segment> },
     /// Environment event broadcast (focus / online).
     Broadcast { ev: SwrEvent },
-    /// A scheduled timer fired. Stale generations are ignored (TMR-1).
+    /// A scheduled timer fired. Stale generations are ignored.
     TimerFired {
         key: QueryKey,
         kind: TimerKind,
@@ -117,21 +116,21 @@ pub(crate) enum Event {
     },
 }
 
-/// Output side effects (5.3). Executed strictly in order (EFF-1), outside the
-/// lock (EFF-4).
+/// Output side effects. Executed strictly in order, outside the
+/// lock.
 pub(crate) enum Effect {
     /// Spawn a detached task running the stored fetcher; its result comes back
-    /// as `CommitOk`/`CommitErr` (D-3).
+    /// as `CommitOk`/`CommitErr`.
     StartFetch {
         key: QueryKey,
-        /// Entry incarnation, echoed back by the commit events (SEQ-5).
+        /// Entry incarnation, echoed back by the commit events.
         incarnation: u64,
         seq: u64,
         fetcher: ErasedFetcher,
     },
     /// Send a fresh snapshot on the entry's watch channel, outside the lock
-    /// (LOCK-3). At most one per key per batch (EFF-3), after any
-    /// `StartFetch` (EFF-2).
+    ///. At most one per key per batch, after any
+    /// `StartFetch`.
     Notify {
         tx: Arc<watch::Sender<Snapshot>>,
         snapshot: Snapshot,
@@ -173,17 +172,17 @@ impl std::fmt::Debug for Effect {
     }
 }
 
-/// What a `Read` returns to the caller (transition tables E1–E3).
+/// What a `Read` returns to the caller.
 pub(crate) enum ReadOutcome {
     /// A snapshot the caller can use immediately.
     Ready(Snapshot),
-    /// Enter the wait loop (5.6) until `data_seq >= target` or
+    /// Enter the wait loop until `data_seq >= target` or
     /// `error_seq >= target`.
     Wait {
         target: u64,
         rx: watch::Receiver<Snapshot>,
     },
-    /// E2-7 / E3-5: nothing cached and no fetcher to run.
+    /// Nothing cached and no fetcher to run.
     NoFetcher,
 }
 
@@ -208,14 +207,14 @@ pub(crate) struct HandleOutput {
     pub effects: Vec<Effect>,
 }
 
-/// Rollback snapshot taken by an optimistic write (4.2).
+/// Rollback snapshot taken by an optimistic write.
 struct OptimisticSnapshot {
     prev_data: Option<ErasedValue>,
     prev_error: Option<ErasedValue>,
     prev_data_seq: u64,
     prev_updated_at: Option<Instant>,
     /// Seq the optimistic value was written at; rollback requires
-    /// `data_seq == written_seq` (SEQ-4).
+    /// `data_seq == written_seq`.
     written_seq: u64,
 }
 
@@ -223,14 +222,14 @@ struct OptimisticSnapshot {
 #[derive(Default)]
 struct EntryOptions {
     subs: HashMap<u64, QueryOptions>,
-    /// `gc_time` from the most recent `Read`/`Subscribe` touch. OPT-2 speaks
-    /// of "the latest Read"; subscriptions are included so a sole subscriber's
+    /// `gc_time` from the most recent `Read`/`Subscribe` touch.
+    /// Subscriptions are included so a sole subscriber's
     /// `gc_time` still applies after it unsubscribes.
     last_touch_gc_time: Option<Duration>,
 }
 
 impl EntryOptions {
-    /// OPT-2: max of active subscribers and the latest touch.
+    /// Max of active subscribers and the latest touch.
     fn gc_time(&self, default_gc: Duration) -> Duration {
         self.subs
             .values()
@@ -240,12 +239,12 @@ impl EntryOptions {
             .unwrap_or(default_gc)
     }
 
-    /// OPT-3: min non-`None` interval among active subscribers.
+    /// Min non-`None` interval among active subscribers.
     fn refresh_interval(&self) -> Option<Duration> {
         self.subs.values().filter_map(|o| o.refresh_interval).min()
     }
 
-    /// OPT-1 (broadcast/refresh side): min `stale_time` among active subscribers.
+    /// Broadcast/refresh side: min `stale_time` among active subscribers.
     fn min_stale_time(&self, default_stale: Duration) -> Duration {
         self.subs
             .values()
@@ -254,18 +253,18 @@ impl EntryOptions {
             .unwrap_or(default_stale)
     }
 
-    /// OPT-4: enabled if any active subscriber enables it.
+    /// Enabled if any active subscriber enables it.
     fn any_on_focus(&self) -> bool {
         self.subs.values().any(|o| o.revalidate_on_focus)
     }
 
-    /// OPT-4: enabled if any active subscriber enables it.
+    /// Enabled if any active subscriber enables it.
     fn any_on_online(&self) -> bool {
         self.subs.values().any(|o| o.revalidate_on_online)
     }
 
-    /// OPT-5: min focus throttle among active subscribers (the most eager
-    /// subscriber wins, like OPT-1/OPT-3).
+    /// Min focus throttle among active subscribers (the most eager
+    /// subscriber wins).
     fn min_focus_throttle(&self, default_throttle: Duration) -> Duration {
         self.subs
             .values()
@@ -275,10 +274,10 @@ impl EntryOptions {
     }
 }
 
-/// One cache entry (spec 4.2).
+/// One cache entry.
 struct EntryCore {
     /// Distinguishes this entry from earlier incarnations under the same key
-    /// (SEQ-5, D-31): per-entry seqs restart at 0 after GC removal, so a
+    ///: per-entry seqs restart at 0 after GC removal, so a
     /// discarded old-incarnation flight could otherwise alias a new flight's
     /// seq and commit into the wrong incarnation.
     incarnation: u64,
@@ -301,13 +300,13 @@ struct EntryCore {
     subscribers: usize,
     gc_gen: u64,
     refresh_gen: u64,
-    /// Focus-triggered revalidation is suppressed until this instant (OPT-5,
-    /// SWR's `focusThrottleInterval`). Re-armed on each accepted focus event.
+    /// Focus-triggered revalidation is suppressed until this instant
+    /// (SWR's `focusThrottleInterval`). Re-armed on each accepted focus event.
     focus_blocked_until: Option<Instant>,
 
     // ---- behavior ----
     fetcher: Option<ErasedFetcher>,
-    /// Structural-sharing comparator (D-30, CMP-1): decides only whether the
+    /// Structural-sharing comparator: decides only whether the
     /// stored `Arc` is kept on an equal commit; never affects seq or notify.
     compare: Option<ErasedCompare>,
     opts: EntryOptions,
@@ -346,12 +345,12 @@ impl EntryCore {
         }
     }
 
-    /// `start_fetch!` precondition (5.4).
+    /// `start_fetch!` precondition.
     fn can_start_fetch(&self) -> bool {
         self.fetcher.is_some() && self.mutation_active == 0 && self.inflight.is_none()
     }
 
-    /// `is_stale` (5.4). An unrepresentable deadline (`updated_at +
+    /// `is_stale`. An unrepresentable deadline (`updated_at +
     /// stale_time` overflows, e.g. `QueryOptions::immutable()`) means the
     /// entry never goes stale by time.
     fn is_stale(&self, stale_time: Duration, now: Instant) -> bool {
@@ -362,18 +361,18 @@ impl EntryCore {
             })
     }
 
-    /// `active` (5.4).
+    /// `active`.
     fn is_active(&self) -> bool {
         self.subscribers > 0
     }
 
-    /// `discard_flight!` (5.4): a future commit of the old flight now fails SEQ-2.
+    /// `discard_flight!`: a future commit of the old flight is now dropped as stale.
     fn discard_flight(&mut self) {
         self.seq += 1;
         self.inflight = None;
     }
 
-    /// `local_write!` (5.4).
+    /// `local_write!`.
     fn local_write(&mut self, value: ErasedValue, now: Instant) {
         self.seq += 1;
         self.data = Some(value);
@@ -384,7 +383,7 @@ impl EntryCore {
         self.inflight = None;
     }
 
-    /// Entry is idle: eligible for the GC countdown (GC-1).
+    /// Entry is idle: eligible for the GC countdown.
     fn is_quiescent(&self) -> bool {
         self.subscribers == 0 && self.mutation_active == 0 && self.inflight.is_none()
     }
@@ -408,11 +407,11 @@ impl EntryCore {
     }
 }
 
-/// `start_fetch!` (5.4): consume a seq, mark it in flight, emit `StartFetch`.
+/// `start_fetch!`: consume a seq, mark it in flight, emit `StartFetch`.
 ///
 /// Also clears `invalidated`: the started fetch is the one converging the
-/// invalidation, and its own commit must satisfy INV-A (OPEN_QUESTIONS Q-1;
-/// same move E11 step 3 makes explicitly).
+/// invalidation, and its own commit must find the flag already cleared (the
+/// mutation-closing revalidation makes the same move).
 fn start_fetch(e: &mut EntryCore, key: &QueryKey, ctx: &mut Ctx) -> u64 {
     debug_assert!(e.can_start_fetch(), "start_fetch! precondition violated");
     e.seq += 1;
@@ -435,12 +434,13 @@ fn start_fetch(e: &mut EntryCore, key: &QueryKey, ctx: &mut Ctx) -> u64 {
 #[derive(Default)]
 struct Ctx {
     effects: Vec<Effect>,
-    /// Keys needing a `Notify`; flushed as one merged send per key (EFF-3),
-    /// after all `StartFetch` effects (EFF-2).
+    /// Keys needing a `Notify`; flushed as one merged send per key,
+    /// after all `StartFetch` effects.
     notify: Vec<QueryKey>,
-    /// Keys the event touched; GC-1 runs over these.
+    /// Keys the event touched; the GC post-rule runs over these.
     touched: Vec<QueryKey>,
-    /// Keys whose refresh scheduling basis changed; RF-1 runs over these.
+    /// Keys whose refresh scheduling basis changed; the refresh post-rule
+    /// runs over these.
     refresh_changed: Vec<QueryKey>,
 }
 
@@ -464,12 +464,12 @@ impl Ctx {
     }
 }
 
-/// The state machine (5.1). One instance behind the client's single lock.
+/// The state machine. One instance behind the client's single lock.
 pub(crate) struct Inner {
     entries: HashMap<QueryKey, EntryCore>,
     defaults: QueryOptions,
     next_sub_id: u64,
-    /// Incarnation counter for newly created entries (SEQ-5).
+    /// Incarnation counter for newly created entries.
     next_incarnation: u64,
 }
 
@@ -483,9 +483,9 @@ impl Inner {
         }
     }
 
-    /// Sole entry point (5.1): feed one event, get the outcome plus effects.
-    /// Pure and synchronous; the caller executes effects in order (EFF-1)
-    /// outside the lock (EFF-4).
+    /// Sole entry point: feed one event, get the outcome plus effects.
+    /// Pure and synchronous; the caller executes effects in order
+    /// outside the lock.
     pub(crate) fn handle(&mut self, ev: Event, now: Instant) -> HandleOutput {
         let mut ctx = Ctx::default();
         let outcome = match ev {
@@ -575,7 +575,7 @@ impl Inner {
         }
     }
 
-    /// Fetch-or-create with a fresh incarnation on insert (SEQ-5).
+    /// Fetch-or-create with a fresh incarnation on insert.
     fn entry_or_create(&mut self, key: &QueryKey) -> &mut EntryCore {
         if !self.entries.contains_key(key) {
             let incarnation = self.next_incarnation;
@@ -586,10 +586,10 @@ impl Inner {
         self.entries.get_mut(key).expect("just ensured above")
     }
 
-    /// E1 / E2 / E3.
+    /// The read path: cache-only, stale-while-revalidate, or ensure-fresh.
     #[allow(
         clippy::too_many_arguments,
-        reason = "mirrors the Event::Read payload; splitting it would obscure the E1-E3 tables"
+        reason = "mirrors the Event::Read payload; splitting it would obscure the read path"
     )]
     fn on_read(
         &mut self,
@@ -602,11 +602,11 @@ impl Inner {
         ctx: &mut Ctx,
     ) -> Outcome {
         if policy == ReadPolicy::CacheOnly {
-            // E1-1: a missing entry is *not* created.
+            // A missing entry is *not* created.
             let Some(e) = self.entries.get_mut(&key) else {
                 return Outcome::Read(ReadOutcome::Ready(Snapshot::empty()));
             };
-            // E1-2: last-wins fetcher replacement; the read's gc_time joins OPT-2.
+            // Last-wins fetcher replacement; the read's gc_time joins the GC aggregation.
             if let Some(f) = fetcher {
                 e.fetcher = Some(f);
             }
@@ -618,7 +618,7 @@ impl Inner {
             return Outcome::Read(ReadOutcome::Ready(e.snapshot_now()));
         }
 
-        // E2/E3 preamble: create if missing; fetcher last-wins; record read opts.
+        // Create if missing; fetcher last-wins; record read opts.
         let e = self.entry_or_create(&key);
         if let Some(f) = fetcher {
             e.fetcher = Some(f);
@@ -634,24 +634,24 @@ impl Inner {
         let read = match policy {
             ReadPolicy::StaleWhileRevalidate => {
                 if has_data && !stale {
-                    // E2-1: fresh hit.
+                    // Fresh hit.
                     ReadOutcome::Ready(e.snapshot_now())
                 } else if has_data {
-                    // E2-2: stale hit — refresh in the background if possible.
+                    // Stale hit — refresh in the background if possible.
                     if e.can_start_fetch() {
                         start_fetch(e, &key, ctx);
                         ctx.mark_notify(&key);
                     }
-                    // E2-2 / E2-3: either way, return the stale snapshot now.
+                    // Either way, return the stale snapshot now.
                     ReadOutcome::Ready(e.snapshot_now())
                 } else if let Some(s) = e.inflight {
-                    // E2-4: no data, join the in-flight request.
+                    // No data, join the in-flight request.
                     ReadOutcome::Wait {
                         target: s,
                         rx: e.tx.subscribe(),
                     }
                 } else if e.can_start_fetch() {
-                    // E2-5: no data, start the first load.
+                    // No data, start the first load.
                     let s = start_fetch(e, &key, ctx);
                     ctx.mark_notify(&key);
                     ReadOutcome::Wait {
@@ -659,28 +659,28 @@ impl Inner {
                         rx: e.tx.subscribe(),
                     }
                 } else if e.mutation_active > 0 {
-                    // E2-6: wait for the mutation to settle (or a later fetch).
+                    // Wait for the mutation to settle (or a later fetch).
                     ReadOutcome::Wait {
                         target: e.seq,
                         rx: e.tx.subscribe(),
                     }
                 } else {
-                    // E2-7.
+                    // No data and no fetcher.
                     ReadOutcome::NoFetcher
                 }
             }
             ReadPolicy::EnsureFresh => {
                 if has_data && !stale {
-                    // E3-1: fresh hit.
+                    // Fresh hit.
                     ReadOutcome::Ready(e.snapshot_now())
                 } else if let Some(s) = e.inflight {
-                    // E3-2.
+                    // Join the in-flight request.
                     ReadOutcome::Wait {
                         target: s,
                         rx: e.tx.subscribe(),
                     }
                 } else if e.can_start_fetch() {
-                    // E3-3.
+                    // Start the fetch and wait for it.
                     let s = start_fetch(e, &key, ctx);
                     ctx.mark_notify(&key);
                     ReadOutcome::Wait {
@@ -688,13 +688,13 @@ impl Inner {
                         rx: e.tx.subscribe(),
                     }
                 } else if e.mutation_active > 0 {
-                    // E3-4.
+                    // Wait for the mutation to settle.
                     ReadOutcome::Wait {
                         target: e.seq,
                         rx: e.tx.subscribe(),
                     }
                 } else {
-                    // E3-5.
+                    // No data and no fetcher.
                     ReadOutcome::NoFetcher
                 }
             }
@@ -703,7 +703,7 @@ impl Inner {
         Outcome::Read(read)
     }
 
-    /// E4.
+    /// A `QueryHandle` subscription is being created.
     fn on_subscribe(
         &mut self,
         key: QueryKey,
@@ -717,7 +717,7 @@ impl Inner {
         self.next_sub_id += 1;
         let e = self.entry_or_create(&key);
         ctx.mark_touched(&key);
-        // E4 preamble: last-wins only when a fetcher is provided (D-32).
+        // Last-wins only when a fetcher is provided.
         if let Some(f) = fetcher {
             e.fetcher = Some(f);
         }
@@ -727,27 +727,27 @@ impl Inner {
         e.opts.last_touch_gc_time = Some(opts.gc_time);
         let stale = e.is_stale(opts.stale_time, now);
         e.opts.subs.insert(sub_id, opts);
-        // E4-1: count the subscriber; bumping gc_gen logically cancels any
+        // Count the subscriber; bumping gc_gen logically cancels any
         // pending GC timer.
         e.subscribers += 1;
         e.gc_gen += 1;
         ctx.mark_refresh_changed(&key);
-        // E4-2: missing or stale data starts a fetch when possible.
+        // Missing or stale data starts a fetch when possible.
         if (e.data.is_none() || stale) && e.can_start_fetch() {
             start_fetch(e, &key, ctx);
             ctx.mark_notify(&key);
         }
         // No extra Notify for the subscription itself: the watch channel's
-        // current value already is the snapshot (E4 note).
+        // current value already is the snapshot.
         Outcome::Subscribed {
             sub_id,
             rx: e.tx.subscribe(),
         }
     }
 
-    /// E5.
+    /// A `QueryHandle` was dropped.
     fn on_unsubscribe(&mut self, key: &QueryKey, sub_id: u64, ctx: &mut Ctx) {
-        // E5-1.
+        // Unknown keys are ignored.
         let Some(e) = self.entries.get_mut(key) else {
             return;
         };
@@ -756,12 +756,12 @@ impl Inner {
         e.opts.subs.remove(&sub_id);
         ctx.mark_touched(key);
         ctx.mark_refresh_changed(key);
-        // GC-1 / RF-1 post rules do the rest.
+        // The GC and refresh post-rules do the rest.
     }
 
-    /// E6.
+    /// A manual revalidation request.
     fn on_revalidate_requested(&mut self, key: &QueryKey, ctx: &mut Ctx) {
-        // E6-1: no entry or no fetcher — nothing to do.
+        // No entry or no fetcher — nothing to do.
         let Some(e) = self.entries.get_mut(key) else {
             return;
         };
@@ -769,16 +769,16 @@ impl Inner {
             return;
         }
         ctx.mark_touched(key);
-        // E6-2: deduplicate against an in-flight request or active mutation.
+        // Deduplicate against an in-flight request or active mutation.
         if e.inflight.is_some() || e.mutation_active > 0 {
             return;
         }
-        // E6-3.
+        // Start the fetch.
         start_fetch(e, key, ctx);
         ctx.mark_notify(key);
     }
 
-    /// E7.
+    /// A fetch task finished successfully.
     fn on_commit_ok(
         &mut self,
         key: &QueryKey,
@@ -788,35 +788,35 @@ impl Inner {
         now: Instant,
         ctx: &mut Ctx,
     ) {
-        // E7-1: entry already GC'd — a legal race, drop silently (GC-2).
+        // Entry already GC'd — a legal race, drop silently.
         let Some(e) = self.entries.get_mut(key) else {
             return;
         };
-        // E7-0 / SEQ-5: a flight from an earlier incarnation of this key must
-        // not alias the rebuilt entry's seq space (D-31).
+        // A flight from an earlier incarnation of this key must
+        // not alias the rebuilt entry's seq space.
         if e.incarnation != incarnation {
             return;
         }
-        // E7-2: mutations veto every fetch commit (SEQ-2, D-6).
+        // Mutations veto every fetch commit.
         if e.mutation_active > 0 {
             return;
         }
-        // E7-3: out-of-order or interrupted response (SEQ-2).
+        // Out-of-order or interrupted response.
         if e.inflight != Some(seq) {
             return;
         }
-        // E7-4: the commit lands.
+        // The commit lands.
         debug_assert_eq!(e.seq, seq, "inflight seq must equal the entry seq");
         debug_assert!(
             !e.invalidated,
-            "INV-A: invalidated must be false on the commit-apply path"
+            "invalidated must be false on the commit-apply path"
         );
-        // D-30 / CMP-1: structural sharing. When a comparator says the new
+        // structural sharing. When a comparator says the new
         // value equals the current one, keep the old `Arc` (so subscribers can
         // detect no-change via `Arc::ptr_eq`) and drop the new allocation.
         // Everything else — data_seq, updated_at, the notify — advances
         // exactly as without a comparator; skipping the notify would strand
-        // EnsureFresh waiters (WAIT-1, D-11).
+        // EnsureFresh waiters.
         let unchanged = e
             .compare
             .as_ref()
@@ -835,7 +835,7 @@ impl Inner {
         ctx.mark_refresh_changed(key);
     }
 
-    /// E8.
+    /// A fetch task failed.
     fn on_commit_err(
         &mut self,
         key: &QueryKey,
@@ -844,7 +844,7 @@ impl Inner {
         error: ErasedValue,
         ctx: &mut Ctx,
     ) {
-        // E8-1..3: same guards as E7, including the incarnation fence (E8-0).
+        // Same drop guards as the success commit, incarnation fence included.
         let Some(e) = self.entries.get_mut(key) else {
             return;
         };
@@ -857,7 +857,7 @@ impl Inner {
         if e.inflight != Some(seq) {
             return;
         }
-        // E8-4: record the error; data and updated_at stay untouched (D-10).
+        // Record the error; data and updated_at stay untouched.
         e.error = Some(error);
         e.error_seq = seq;
         e.inflight = None;
@@ -866,17 +866,16 @@ impl Inner {
         ctx.mark_refresh_changed(key);
     }
 
-    /// E9.
+    /// A synchronous local write.
     fn on_mutate_set(&mut self, key: QueryKey, value: ErasedValue, now: Instant, ctx: &mut Ctx) {
         let e = self.entry_or_create(&key);
         ctx.mark_touched(&key);
-        // E9-1.
         e.local_write(value, now);
         e.optimistic = None;
         ctx.mark_notify(&key);
     }
 
-    /// E10.
+    /// An async mutation begins.
     fn on_mutate_begin(
         &mut self,
         key: QueryKey,
@@ -885,15 +884,15 @@ impl Inner {
     ) -> Outcome {
         let e = self.entry_or_create(&key);
         ctx.mark_touched(&key);
-        // E10-1: the is_mutating flip must notify — wait loops depend on it (5.6).
+        // The is_mutating flip must notify — wait loops depend on it.
         e.mutation_active += 1;
         e.discard_flight();
         ctx.mark_notify(&key);
         let mut written_seq = None;
         if let Some(value) = optimistic {
-            // E10-2: snapshot the previous state, then write the optimistic
+            // Snapshot the previous state, then write the optimistic
             // value. `updated_at` stays put: optimistic values never count as
-            // fresh (D-7).
+            // fresh.
             e.seq += 1;
             e.optimistic = Some(OptimisticSnapshot {
                 prev_data: e.data.take(),
@@ -909,7 +908,8 @@ impl Inner {
         Outcome::Mutation(MutationToken { key, written_seq })
     }
 
-    /// E11. Steps run in order; they are not mutually exclusive guards.
+    /// An async mutation finished. Steps run in order; they are not
+    /// mutually exclusive guards.
     fn on_mutate_commit(
         &mut self,
         token: MutationToken,
@@ -922,15 +922,14 @@ impl Inner {
         let Some(e) = self.entries.get_mut(&key) else {
             debug_assert!(
                 false,
-                "MutateCommit on removed entry: mutation_active blocks GC (E14)"
+                "MutateCommit on removed entry: active mutations block GC"
             );
             return;
         };
         ctx.mark_touched(&key);
-        // E11-1.
         debug_assert!(e.mutation_active > 0, "MutateCommit without MutateBegin");
         e.mutation_active = e.mutation_active.saturating_sub(1);
-        // E11-2.
+        // Apply the result.
         match result {
             Ok(Some(value)) if flags.populate => {
                 e.local_write(value, now);
@@ -940,31 +939,32 @@ impl Inner {
             Ok(_) => {
                 // The optimistic value stays as the current value; step 3's
                 // revalidation converges the truth. Only this mutation's own
-                // snapshot is dropped (single-slot policy, spec §13).
+                // snapshot is dropped (single-slot policy).
                 clear_own_optimistic(e, &token);
             }
             Err(error) => {
-                // Mutation errors never write error_seq (WAIT-4): they belong
+                // Mutation errors never write error_seq: they belong
                 // to the mutate() caller, not to waiting readers.
                 e.error = Some(error);
                 ctx.mark_notify(&key);
                 rollback_if_unclobbered(e, &token, flags.rollback_on_error);
             }
         }
-        // E11-3.
+        // The closing revalidation.
         finish_mutation(e, &key, flags.revalidate, ctx);
-        // E11-4: always notify — the is_mutating flip back to false is the
-        // wake-up the wait loop (5.6) relies on. EFF-3 merges duplicates.
+        // Always notify — the is_mutating flip back to false is the
+        // wake-up the wait loop relies on. Duplicate notifies in one batch
+        // merge into one.
         ctx.mark_notify(&key);
     }
 
-    /// `MutateAbort`: the error path of E11 without an error to record.
+    /// `MutateAbort`: the mutation error path without an error to record.
     fn on_mutate_abort(&mut self, token: MutationToken, flags: MutateFlags, ctx: &mut Ctx) {
         let key = token.key.clone();
         let Some(e) = self.entries.get_mut(&key) else {
             debug_assert!(
                 false,
-                "MutateAbort on removed entry: mutation_active blocks GC (E14)"
+                "MutateAbort on removed entry: active mutations block GC"
             );
             return;
         };
@@ -976,9 +976,9 @@ impl Inner {
         ctx.mark_notify(&key);
     }
 
-    /// E12.
+    /// Prefix invalidation.
     fn on_invalidate(&mut self, prefix: &[Segment], ctx: &mut Ctx) {
-        // K-3: v1 prefix matching is an O(n) scan over the table.
+        // v1 prefix matching is an O(n) scan over the table.
         let keys: Vec<QueryKey> = self
             .entries
             .keys()
@@ -991,18 +991,18 @@ impl Inner {
                 .get_mut(&key)
                 .expect("key collected from the table above");
             ctx.mark_touched(&key);
-            // E12-1: during a mutation, only mark; E11 step 3 converges later.
+            // During a mutation, only mark; the mutation-closing revalidation converges later.
             if e.mutation_active > 0 {
                 e.invalidated = true;
                 continue;
             }
-            // E12-2: mark dirty; discard any in-flight request (D-5).
+            // Mark dirty; discard any in-flight request.
             e.invalidated = true;
             if e.inflight.is_some() {
                 e.discard_flight();
             }
             ctx.mark_notify(&key);
-            // E12-3: active entries with a fetcher refetch immediately.
+            // Active entries with a fetcher refetch immediately.
             if e.is_active() && e.fetcher.is_some() {
                 start_fetch(e, &key, ctx);
                 ctx.mark_notify(&key);
@@ -1012,7 +1012,7 @@ impl Inner {
         }
     }
 
-    /// E13.
+    /// An environment event broadcast.
     fn on_broadcast(&mut self, ev: SwrEvent, now: Instant, ctx: &mut Ctx) {
         let default_stale = self.defaults.stale_time;
         let default_throttle = self.defaults.focus_throttle;
@@ -1022,7 +1022,7 @@ impl Inner {
                 .entries
                 .get_mut(&key)
                 .expect("key collected from the table above");
-            // E13: every condition must hold.
+            // Every condition must hold.
             if !e.is_active() {
                 continue;
             }
@@ -1033,7 +1033,7 @@ impl Inner {
             if !enabled {
                 continue;
             }
-            // OPT-5 (D-27): focus events are throttled per entry; online
+            // focus events are throttled per entry; online
             // events are not (mirrors SWR's focusThrottleInterval).
             if ev == SwrEvent::Focus && e.focus_blocked_until.is_some_and(|until| now < until) {
                 continue;
@@ -1055,41 +1055,41 @@ impl Inner {
         }
     }
 
-    /// E14.
+    /// A GC timer fired.
     fn on_timer_gc(&mut self, key: &QueryKey, generation: u64) {
-        // E14-1: missing entry or stale generation (TMR-1) — ignore.
+        // Missing entry or stale generation — ignore.
         let Some(e) = self.entries.get(key) else {
             return;
         };
         if generation != e.gc_gen {
             return;
         }
-        // E14-2: remove; dropping the watch sender closes every receiver.
+        // Remove; dropping the watch sender closes every receiver.
         if e.is_quiescent() {
             self.entries.remove(key);
         }
-        // E14-3: otherwise ignore.
+        // Otherwise ignore.
     }
 
-    /// E15.
+    /// A refresh timer fired.
     fn on_timer_refresh(&mut self, key: &QueryKey, generation: u64, ctx: &mut Ctx) {
-        // E15-1: missing entry or stale generation (TMR-1) — ignore.
+        // Missing entry or stale generation — ignore.
         let Some(e) = self.entries.get_mut(key) else {
             return;
         };
         if generation != e.refresh_gen {
             return;
         }
-        // E15-2: no subscribers — natural stop.
+        // No subscribers — natural stop.
         if e.subscribers == 0 {
             return;
         }
-        // E15-3: busy — only re-arm the next tick via RF-1.
+        // Busy — only re-arm the next tick.
         if e.inflight.is_some() || e.mutation_active > 0 {
             ctx.mark_refresh_changed(key);
             return;
         }
-        // E15-4: refresh now, and re-arm via RF-1.
+        // Refresh now, and re-arm the next tick.
         if e.fetcher.is_some() {
             ctx.mark_touched(key);
             start_fetch(e, key, ctx);
@@ -1098,11 +1098,12 @@ impl Inner {
         ctx.mark_refresh_changed(key);
     }
 
-    /// GC-1 and RF-1 (5.4): run after every event over the touched entries.
+    /// GC and refresh post-rules, run after every event over the touched
+    /// entries.
     fn post_rules(&mut self, now: Instant, ctx: &mut Ctx) {
         let default_gc = self.defaults.gc_time;
-        // GC-1: quiescent entries (re)start the GC countdown. An in-flight
-        // request defers scheduling until its commit lands (D-8).
+        // quiescent entries (re)start the GC countdown. An in-flight
+        // request defers scheduling until its commit lands.
         let touched = std::mem::take(&mut ctx.touched);
         for key in &touched {
             let Some(e) = self.entries.get_mut(key) else {
@@ -1122,7 +1123,7 @@ impl Inner {
                 }
             }
         }
-        // RF-1: reschedule when the refresh basis changed.
+        // reschedule when the refresh basis changed.
         let refresh = std::mem::take(&mut ctx.refresh_changed);
         for key in &refresh {
             let Some(e) = self.entries.get_mut(key) else {
@@ -1149,7 +1150,7 @@ impl Inner {
         }
     }
 
-    /// EFF-2 / EFF-3: append one merged `Notify` per marked key, after every
+    /// append one merged `Notify` per marked key, after every
     /// `StartFetch` in the batch.
     fn flush_notifies(&mut self, ctx: &mut Ctx) {
         for key in std::mem::take(&mut ctx.notify) {
@@ -1165,7 +1166,7 @@ impl Inner {
         }
     }
 
-    /// Test hook: force-remove an entry, simulating a completed GC (IT2).
+    /// Test hook: force-remove an entry, simulating a completed GC.
     #[cfg(test)]
     pub(crate) fn remove_entry_for_test(&mut self, key: &QueryKey) {
         self.entries.remove(key);
@@ -1173,7 +1174,7 @@ impl Inner {
 }
 
 /// Drop this mutation's own optimistic snapshot, leaving another mutation's
-/// snapshot in place (single-slot policy, spec §13).
+/// snapshot in place (single-slot policy).
 fn clear_own_optimistic(e: &mut EntryCore, token: &MutationToken) {
     let Some(ws) = token.written_seq else {
         return;
@@ -1183,7 +1184,7 @@ fn clear_own_optimistic(e: &mut EntryCore, token: &MutationToken) {
     }
 }
 
-/// E11-2 error branch / SEQ-4: roll back only when this mutation's optimistic
+/// Error-path rollback: roll back only when this mutation's optimistic
 /// write is still the latest write (`data_seq == written_seq`); otherwise the
 /// later write wins and the snapshot is dropped.
 fn rollback_if_unclobbered(e: &mut EntryCore, token: &MutationToken, rollback_on_error: bool) {
@@ -1192,7 +1193,7 @@ fn rollback_if_unclobbered(e: &mut EntryCore, token: &MutationToken, rollback_on
     };
     if !e.optimistic.as_ref().is_some_and(|s| s.written_seq == ws) {
         // The slot belongs to a later mutation (or was cleared by a local
-        // write, E9); data_seq has moved past ws either way — skip.
+        // write); data_seq has moved past ws either way — skip.
         return;
     }
     let snap = e.optimistic.take().expect("checked above");
@@ -1202,10 +1203,10 @@ fn rollback_if_unclobbered(e: &mut EntryCore, token: &MutationToken, rollback_on
         e.data_seq = snap.prev_data_seq;
         e.updated_at = snap.prev_updated_at;
     }
-    // SEQ-4 otherwise: a later write wins; the snapshot is dropped either way.
+    // Otherwise a later write wins; the snapshot is dropped either way.
 }
 
-/// E11 step 3: once the last concurrent mutation is out, revalidate (or
+/// Once the last concurrent mutation is out, revalidate (or
 /// converge a deferred invalidation).
 fn finish_mutation(e: &mut EntryCore, key: &QueryKey, revalidate: bool, ctx: &mut Ctx) {
     if e.mutation_active == 0 && (revalidate || e.invalidated) && e.can_start_fetch() {

@@ -75,7 +75,7 @@ impl<K, T> JsonFetcher<K, T> {
     }
 }
 
-// Manual impl: cloning must not require `K: Clone` or `T: Clone` (TE-2 spirit).
+// Manual impl: cloning must not require `K: Clone` or `T: Clone`.
 impl<K, T> Clone for JsonFetcher<K, T> {
     fn clone(&self) -> Self {
         Self {

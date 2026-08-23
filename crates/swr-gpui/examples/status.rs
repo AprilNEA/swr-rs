@@ -22,7 +22,7 @@ struct StatusView {
 impl StatusView {
     fn new(client: &SwrClient, cx: &mut Context<Self>) -> Self {
         // A fake upstream: each poll returns a new revision. `subscribe_eq`
-        // would keep the Arc stable when content does not change (D-30).
+        // would keep the Arc stable when content does not change.
         let polls = Arc::new(AtomicU32::new(0));
         let handle = client.subscribe(
             ("status",),

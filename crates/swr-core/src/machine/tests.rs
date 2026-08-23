@@ -1,8 +1,8 @@
-//! M1 state-machine unit tests T1–T14 (spec 9.1). Pure synchronous: events
+//! State-machine unit tests. Pure synchronous: events
 //! in, state and effects asserted, no async runtime.
 #![allow(
     clippy::disallowed_methods,
-    reason = "tests construct base instants directly; RT-1 applies to library code"
+    reason = "tests construct base instants directly; the Runtime::now rule applies to library code"
 )]
 
 use std::sync::Arc;
@@ -142,7 +142,8 @@ impl Machine {
     }
 
     /// The current incarnation of `key`'s entry (0 for a missing entry, so
-    /// commits to removed entries exercise the E7-1 guard, not E7-0).
+    /// commits to removed entries exercise the missing-entry guard, not the
+    /// incarnation fence).
     fn incarnation(&self, key: &QueryKey) -> u64 {
         self.inner.entries.get(key).map_or(0, |e| e.incarnation)
     }
@@ -221,10 +222,10 @@ fn outcome_kind(outcome: &Outcome) -> &'static str {
     }
 }
 
-/// T1: a local write interrupts the flight; the late commit is dropped
-/// (SEQ-2 / SEQ-3).
+/// a local write interrupts the flight; the late commit is dropped
+///.
 #[test]
-fn t1_mutate_interrupts_inflight() {
+fn mutate_interrupts_inflight() {
     let mut m = Machine::new();
     let k = key("a");
     let out = m.read(&k, ReadPolicy::StaleWhileRevalidate);
@@ -241,10 +242,10 @@ fn t1_mutate_interrupts_inflight() {
     assert!(e.inflight.is_none());
 }
 
-/// T2: invalidate discards the flight and refetches; the old response is
-/// dropped, the new one lands (SEQ-2, D-5).
+/// invalidate discards the flight and refetches; the old response is
+/// dropped, the new one lands.
 #[test]
-fn t2_out_of_order_after_invalidate() {
+fn out_of_order_after_invalidate() {
     let mut m = Machine::new();
     let k = key("a");
     let (_, out) = m.subscribe(&k, QueryOptions::default());
@@ -255,7 +256,11 @@ fn t2_out_of_order_after_invalidate() {
     });
     // discard_flight consumed seq 2; the refetch is seq 3.
     assert_eq!(start_fetch_seqs(&out.effects), [3]);
-    assert_eq!(notify_count(&out.effects), 1, "EFF-3 merges the notifies");
+    assert_eq!(
+        notify_count(&out.effects),
+        1,
+        "notifies merge within a batch"
+    );
 
     let out = m.commit_ok(&k, 1, 10);
     assert!(out.effects.is_empty(), "stale response dropped");
@@ -268,10 +273,10 @@ fn t2_out_of_order_after_invalidate() {
     assert!(e.inflight.is_none());
 }
 
-/// T3: a local write between the optimistic write and the failed commit wins;
-/// no rollback (SEQ-4).
+/// a local write between the optimistic write and the failed commit wins;
+/// no rollback.
 #[test]
-fn t3_rollback_collision() {
+fn rollback_collision() {
     let mut m = Machine::new();
     let k = key("a");
     let (token, _) = m.mutate_begin(&k, Some(1));
@@ -292,10 +297,10 @@ fn t3_rollback_collision() {
     assert_eq!(e.mutation_active, 0);
 }
 
-/// T4: failed mutation rolls the optimistic write back to the snapshot
+/// failed mutation rolls the optimistic write back to the snapshot
 /// (data, error, data_seq, updated_at).
 #[test]
-fn t4_normal_rollback() {
+fn normal_rollback() {
     let mut m = Machine::new();
     let k = key("a");
     m.mutate_set(&k, 1);
@@ -307,7 +312,7 @@ fn t4_normal_rollback() {
     assert_eq!(
         m.entry(&k).updated_at,
         t0,
-        "optimistic write keeps updated_at (D-7)"
+        "optimistic write keeps updated_at"
     );
 
     let out = m.handle(Event::MutateCommit {
@@ -325,10 +330,10 @@ fn t4_normal_rollback() {
     assert_eq!(e.mutation_active, 0);
 }
 
-/// T5: an active mutation vetoes fetch commits; populate writes the result and
-/// the closing revalidation starts a fresh fetch (D-6, E11 step 3).
+/// an active mutation vetoes fetch commits; populate writes the result and
+/// the closing revalidation starts a fresh fetch.
 #[test]
-fn t5_mutation_blocks_commit_then_populates() {
+fn mutation_blocks_commit_then_populates() {
     let mut m = Machine::new();
     let k = key("a");
     let out = m.read(&k, ReadPolicy::StaleWhileRevalidate);
@@ -350,10 +355,10 @@ fn t5_mutation_blocks_commit_then_populates() {
     assert_eq!(m.entry(&k).inflight, Some(fetches[0]));
 }
 
-/// T6: CommitErr keeps old data and updated_at; the error slots in beside the
-/// data (D-10), with a single merged notify (EFF-3).
+/// CommitErr keeps old data and updated_at; the error slots in beside the
+/// data, with a single merged notify.
 #[test]
-fn t6_commit_err_keeps_data() {
+fn commit_err_keeps_data() {
     let mut m = Machine::new();
     let k = key("a");
     m.read(&k, ReadPolicy::StaleWhileRevalidate);
@@ -376,9 +381,9 @@ fn t6_commit_err_keeps_data() {
     assert!(e.inflight.is_none());
 }
 
-/// T7: concurrent reads deduplicate onto one flight and share the target seq.
+/// concurrent reads deduplicate onto one flight and share the target seq.
 #[test]
-fn t7_dedup_two_reads() {
+fn dedup_two_reads() {
     let mut m = Machine::new();
     let k = key("a");
     let out1 = m.read(&k, ReadPolicy::EnsureFresh);
@@ -392,10 +397,10 @@ fn t7_dedup_two_reads() {
     assert_eq!(wait_target(&out1), wait_target(&out2));
 }
 
-/// T8: a new subscription bumps gc_gen, so the pending GC timer is ignored
-/// when it fires (TMR-1).
+/// a new subscription bumps gc_gen, so the pending GC timer is ignored
+/// when it fires.
 #[test]
-fn t8_gc_generation() {
+fn gc_generation() {
     let mut m = Machine::new();
     let k = key("a");
     let out = m.mutate_set(&k, 1);
@@ -425,9 +430,9 @@ fn t8_gc_generation() {
     );
 }
 
-/// T9: an in-flight request defers GC scheduling until its commit lands (GC-1).
+/// an in-flight request defers GC scheduling until its commit lands.
 #[test]
-fn t9_gc_deferred_by_inflight() {
+fn gc_deferred_by_inflight() {
     let mut m = Machine::new();
     let k = key("a");
     let (sub, out) = m.subscribe(&k, QueryOptions::default());
@@ -447,10 +452,10 @@ fn t9_gc_deferred_by_inflight() {
     );
 }
 
-/// T10: refresh interval aggregates to the min; the generation fences stale
-/// timers after all subscribers leave (OPT-3, RF-1, TMR-1).
+/// refresh interval aggregates to the min; the generation fences stale
+/// timers after all subscribers leave.
 #[test]
-fn t10_refresh_lifecycle() {
+fn refresh_lifecycle() {
     let mut m = Machine::new();
     let k = key("a");
     let five = QueryOptions {
@@ -499,10 +504,10 @@ fn t10_refresh_lifecycle() {
     );
 }
 
-/// T11: prefix invalidation crosses value types (K-2); active entries refetch,
+/// prefix invalidation crosses value types; active entries refetch,
 /// idle ones stay marked.
 #[test]
-fn t11_prefix_invalidation_across_types() {
+fn prefix_invalidation_across_types() {
     let mut m = Machine::new();
     let ka = QueryKey::new::<u32, String>(("user", 1u64));
     let kb = QueryKey::new::<String, String>(("user", 2u64));
@@ -531,9 +536,9 @@ fn t11_prefix_invalidation_across_types() {
     assert!(eb.inflight.is_none());
 }
 
-/// T12: broadcasts only disturb active, stale, idle entries (E13).
+/// broadcasts only disturb active, stale, idle entries.
 #[test]
-fn t12_broadcast_targets() {
+fn broadcast_targets() {
     let mut m = Machine::new();
     let ka = key("fresh");
     let kb = key("unsubscribed");
@@ -578,9 +583,9 @@ fn t12_broadcast_targets() {
     );
 }
 
-/// T13: StartFetch precedes Notify (EFF-2) and same-key notifies merge (EFF-3).
+/// StartFetch precedes Notify and same-key notifies merge.
 #[test]
-fn t13_effect_order_and_merge() {
+fn effect_order_and_merge() {
     let mut m = Machine::new();
     let k = key("a");
     m.mutate_set(&k, 1);
@@ -594,7 +599,7 @@ fn t13_effect_order_and_merge() {
         result: Err(err("boom")),
         flags: flags(true, true, true),
     });
-    assert_eq!(notify_count(&out.effects), 1, "EFF-3: one merged notify");
+    assert_eq!(notify_count(&out.effects), 1, "one merged notify per batch");
     let fetch_idx = out
         .effects
         .iter()
@@ -605,13 +610,13 @@ fn t13_effect_order_and_merge() {
         .iter()
         .position(|e| matches!(e, Effect::Notify { .. }))
         .expect("notify");
-    assert!(fetch_idx < notify_idx, "EFF-2: StartFetch before Notify");
+    assert!(fetch_idx < notify_idx, "StartFetch precedes Notify");
 }
 
-/// T14: a stale SWR read returns the old value immediately plus exactly one
-/// background fetch (E2-2).
+/// a stale SWR read returns the old value immediately plus exactly one
+/// background fetch.
 #[test]
-fn t14_stale_read_returns_old_value() {
+fn stale_read_returns_old_value() {
     let mut m = Machine::new();
     let k = key("a");
     m.read(&k, ReadPolicy::StaleWhileRevalidate);
@@ -629,7 +634,7 @@ fn t14_stale_read_returns_old_value() {
     assert_eq!(start_fetch_seqs(&out.effects), [2]);
     assert_eq!(notify_count(&out.effects), 1);
 
-    // A second stale read while the refresh flies does not duplicate it (E2-3).
+    // A second stale read while the refresh flies does not duplicate it.
     let out = m.read(&k, ReadPolicy::StaleWhileRevalidate);
     assert!(start_fetch_seqs(&out.effects).is_empty());
     assert_eq!(
@@ -638,10 +643,10 @@ fn t14_stale_read_returns_old_value() {
     );
 }
 
-/// OPT-5 / D-27: focus revalidation is throttled per entry; online events and
+/// focus revalidation is throttled per entry; online events and
 /// window expiry are not affected.
 #[test]
-fn t15_focus_throttle() {
+fn focus_throttle() {
     let mut m = Machine::new();
     let k = key("a");
     let eager = QueryOptions {
@@ -695,7 +700,7 @@ fn t15_focus_throttle() {
 /// `QueryOptions::immutable()`: fresh forever, deaf to broadcasts, but manual
 /// revalidation still works.
 #[test]
-fn t16_immutable_options() {
+fn immutable_options() {
     let mut m = Machine::new();
     let k = key("a");
     let (_, out) = m.subscribe(&k, QueryOptions::immutable());
@@ -737,10 +742,10 @@ fn t16_immutable_options() {
     );
 }
 
-/// D-30 / CMP-1 (a)(c): an equal commit keeps the stored `Arc` while seq,
+/// An equal commit keeps the stored `Arc` while seq,
 /// updated_at, and the notify all advance; an unequal commit replaces it.
 #[test]
-fn t17_structural_sharing_keeps_the_arc_on_equal_commits() {
+fn structural_sharing_keeps_the_arc_on_equal_commits() {
     let mut m = Machine::new();
     let k = key("a");
     let out = m.handle(Event::Subscribe {
@@ -761,11 +766,7 @@ fn t17_structural_sharing_keeps_the_arc_on_equal_commits() {
     let out = m.handle(Event::RevalidateRequested { key: k.clone() });
     assert_eq!(start_fetch_seqs(&out.effects), [2]);
     let out = m.commit_ok(&k, 2, 5); // equal content
-    assert_eq!(
-        notify_count(&out.effects),
-        1,
-        "CMP-1: equal commits still notify"
-    );
+    assert_eq!(notify_count(&out.effects), 1, "equal commits still notify");
 
     let e = m.entry(&k);
     assert!(
@@ -784,10 +785,10 @@ fn t17_structural_sharing_keeps_the_arc_on_equal_commits() {
     assert_eq!(e.data_seq, 3);
 }
 
-/// D-30 (d): without a comparator, equal commits replace the `Arc` exactly as
+/// Without a comparator, equal commits replace the `Arc` exactly as
 /// before — no behavior change for existing callers.
 #[test]
-fn t18_no_comparator_replaces_the_arc() {
+fn no_comparator_replaces_the_arc() {
     let mut m = Machine::new();
     let k = key("a");
     m.subscribe(
@@ -810,10 +811,10 @@ fn t18_no_comparator_replaces_the_arc() {
     assert_eq!(e.data_seq, 2);
 }
 
-/// SEQ-5 / D-31: after GC removal and rebuild, a commit from the previous
+/// after GC removal and rebuild, a commit from the previous
 /// incarnation is fenced even when its seq aliases the new flight's seq.
 #[test]
-fn t19_cross_incarnation_commit_is_fenced() {
+fn cross_incarnation_commit_is_fenced() {
     let mut m = Machine::new();
     let k = key("a");
 
@@ -846,10 +847,7 @@ fn t19_cross_incarnation_commit_is_fenced() {
         seq: 1,
         value: val(111),
     });
-    assert!(
-        out.effects.is_empty(),
-        "cross-incarnation commit dropped (E7-0)"
-    );
+    assert!(out.effects.is_empty(), "cross-incarnation commit dropped");
     assert_eq!(m.data_u32(&k), None, "stale value must not land");
 
     // The new incarnation's own commit applies normally.
@@ -857,10 +855,10 @@ fn t19_cross_incarnation_commit_is_fenced() {
     assert_eq!(m.data_u32(&k), Some(222));
 }
 
-/// D-32: an observer-only subscription watches without storing a fetcher;
-/// revalidation is inert (E6-1) until some call supplies one.
+/// an observer-only subscription watches without storing a fetcher;
+/// revalidation is inert until some call supplies one.
 #[test]
-fn t20_observer_only_subscription() {
+fn observer_only_subscription() {
     let mut m = Machine::new();
     let k = key("a");
     m.mutate_set(&k, 7);
@@ -880,11 +878,11 @@ fn t20_observer_only_subscription() {
     );
     assert_eq!(m.data_u32(&k), Some(7));
 
-    // E6-1: revalidation requests on a fetcher-less entry are inert.
+    // Revalidation requests on a fetcher-less entry are inert.
     let out = m.handle(Event::RevalidateRequested { key: k.clone() });
     assert!(out.effects.is_empty());
 
-    // A read that supplies a fetcher makes revalidation live (API-2).
+    // A read that supplies a fetcher makes revalidation live.
     m.read(&k, ReadPolicy::CacheOnly);
     let out = m.handle(Event::RevalidateRequested { key: k.clone() });
     assert_eq!(start_fetch_seqs(&out.effects).len(), 1);

@@ -1,5 +1,5 @@
 //! `MaybeSend` / `MaybeSync`: alias `Send` / `Sync` on native targets, relaxed on
-//! `wasm32` (spec 3.2). All types crossing a spawn boundary are bounded by these.
+//! `wasm32`. All types crossing a spawn boundary are bounded by these.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod imp {

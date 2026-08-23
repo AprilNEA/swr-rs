@@ -1,5 +1,5 @@
-//! [`SwrClient`]: the public headless client (spec 7.1) and the async shell
-//! that executes the state machine's effects (LOCK-1..LOCK-4, 5.6).
+//! [`SwrClient`]: the public headless client and the async shell
+//! that executes the state machine's effects.
 
 use std::future::Future;
 use std::sync::{Arc, Weak};
@@ -18,7 +18,7 @@ use crate::options::{MutateFlags, MutateOptions, QueryOptions, ReadPolicy, SwrEv
 use crate::runtime::Runtime;
 use crate::snapshot::Snapshot;
 
-/// Shared core: the single `Inner` lock (LOCK-1), the runtime, and the global
+/// Shared core: the single `Inner` lock, the runtime, and the global
 /// default options.
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
@@ -28,8 +28,8 @@ pub(crate) struct Shared {
 
 impl Shared {
     /// The event pipeline: lock → `handle()` → unlock → execute effects in
-    /// order (EFF-1). Effects never run under the lock (LOCK-2, LOCK-3), and
-    /// never re-enter it directly (EFF-4) — spawned tasks feed follow-up
+    /// order. Effects never run under the lock, and
+    /// never re-enter it directly — spawned tasks feed follow-up
     /// events through a fresh `dispatch`.
     pub(crate) fn dispatch(shared: &Arc<Self>, ev: Event) -> Outcome {
         let now = shared.runtime.now();
@@ -47,7 +47,7 @@ impl Shared {
                     seq,
                     fetcher,
                 } => {
-                    // D-3: detached — the fetch outlives its callers and
+                    // detached — the fetch outlives its callers and
                     // commits to the cache even if every waiter is dropped.
                     let weak = Arc::downgrade(shared);
                     shared.runtime.spawn(Box::pin(async move {
@@ -71,7 +71,7 @@ impl Shared {
                     }));
                 }
                 Effect::Notify { tx, snapshot } => {
-                    // LOCK-3: sent outside the lock. A commit racing ahead of
+                    // sent outside the lock. A commit racing ahead of
                     // this send may already have published a newer snapshot;
                     // the version guard keeps the channel monotonic.
                     tx.send_if_modified(|current| {
@@ -108,14 +108,14 @@ impl Shared {
         }
     }
 
-    /// Test hook: force-remove an entry, simulating a completed GC (IT2).
+    /// Test hook: force-remove an entry, simulating a completed GC.
     #[cfg(test)]
     pub(crate) fn force_remove(&self, key: &QueryKey) {
         self.inner.lock().remove_entry_for_test(key);
     }
 }
 
-/// The headless SWR client (spec 7.1). Cheap to clone; all clones share one
+/// The headless SWR client. Cheap to clone; all clones share one
 /// cache.
 #[derive(Clone)]
 pub struct SwrClient {
@@ -148,7 +148,7 @@ impl SwrClientBuilder {
     }
 }
 
-/// Weak counterpart of [`SwrClient`] (D-33, API-3).
+/// Weak counterpart of [`SwrClient`].
 ///
 /// Dependent-query fetchers — fetchers that call back into the client for
 /// other keys — must capture this instead of a strong client: fetchers are
@@ -168,7 +168,7 @@ impl WeakSwrClient {
     }
 }
 
-/// Outcome of one pass through the wait loop (5.6).
+/// Outcome of one pass through the wait loop.
 enum WaitOutcome {
     Data(ErasedValue),
     Error(ErasedValue),
@@ -186,12 +186,11 @@ impl SwrClient {
         SwrClientBuilder::default()
     }
 
-    /// A weak handle for dependent-query fetchers (D-33, API-3): fetchers
+    /// A weak handle for dependent-query fetchers: fetchers
     /// that fetch other keys capture this and [`upgrade`](WeakSwrClient::upgrade)
     /// per call. The dependency graph between keys must stay acyclic — a key
     /// that (transitively) fetches itself parks as a never-completing flight
-    /// (the core does not detect cycles; caller timeouts are the backstop,
-    /// WAIT-3).
+    /// (the core does not detect cycles; caller timeouts are the backstop).
     pub fn downgrade(&self) -> WeakSwrClient {
         WeakSwrClient {
             shared: Arc::downgrade(&self.shared),
@@ -199,11 +198,11 @@ impl SwrClient {
     }
 
     /// One-shot read (the headless main interface). Behavior per
-    /// [`ReadPolicy`]; see the E1–E3 transition tables.
+    /// [`ReadPolicy`].
     ///
-    /// The core applies no timeout (WAIT-3): wrap the returned future in
+    /// The core applies no timeout: wrap the returned future in
     /// `tokio::time::timeout` or an equivalent if you need one. The fetch
-    /// itself is detached and completes even if this future is dropped (D-3).
+    /// itself is detached and completes even if this future is dropped.
     pub async fn fetch<K, T, E, F>(
         &self,
         key: K,
@@ -219,11 +218,11 @@ impl SwrClient {
         self.fetch_inner(key, fetcher, policy, None).await
     }
 
-    /// [`SwrClient::fetch`] with structural sharing (D-30): commits whose
+    /// [`SwrClient::fetch`] with structural sharing: commits whose
     /// value equals the cached one (per `T: PartialEq`) keep the existing
     /// `Arc`, so consumers can detect "content unchanged" with
     /// [`Arc::ptr_eq`]. Freshness, seq progression, and notifications are
-    /// unaffected (CMP-1).
+    /// unaffected.
     pub async fn fetch_eq<K, T, E, F>(
         &self,
         key: K,
@@ -288,8 +287,8 @@ impl SwrClient {
         }
     }
 
-    /// The wait loop (5.6). Depends only on the watch channel — never on the
-    /// `Inner` lock — and never busy-waits (WAIT-1): each iteration either
+    /// The wait loop. Depends only on the watch channel — never on the
+    /// `Inner` lock — and never busy-waits: each iteration either
     /// returns or parks in `changed()`.
     async fn wait(
         &self,
@@ -302,7 +301,7 @@ impl SwrClient {
                 let snapshot = rx.borrow_and_update();
                 if snapshot.data_seq >= target {
                     // `>=`, not `==`: a newer local write satisfies the wait
-                    // just as well (D-7).
+                    // just as well.
                     let value = snapshot
                         .data
                         .clone()
@@ -312,7 +311,7 @@ impl SwrClient {
                 if snapshot.error_seq >= target {
                     // A newer attempt's failure is also a complete result not
                     // older than the target. Mutation errors never set
-                    // error_seq (WAIT-4), so they are never returned here.
+                    // error_seq, so they are never returned here.
                     let error = snapshot
                         .error
                         .clone()
@@ -322,7 +321,7 @@ impl SwrClient {
                 snapshot.inflight.is_none() && !snapshot.is_mutating
             };
             if poke {
-                // WAIT-1: idempotent poke (E6 dedups); always fall through to
+                // idempotent poke (revalidation requests dedup); always fall through to
                 // the await — never re-check immediately.
                 Shared::dispatch(
                     &self.shared,
@@ -348,13 +347,14 @@ impl SwrClient {
         self.subscribe_inner(query_key, Some(erased), opts, None)
     }
 
-    /// Observer-only subscription (D-32): watch a key without providing a
+    /// Observer-only subscription: watch a key without providing a
     /// fetcher — for entries fed purely by [`SwrClient::set`] / mutations, or
-    /// when another call site already owns the fetcher registration (API-2
-    /// last-wins makes re-supplying closures per subscription a footgun).
+    /// when another call site already owns the fetcher registration
+    /// (fetcher last-wins makes re-supplying closures per subscription a
+    /// footgun).
     ///
     /// While the entry has no stored fetcher, revalidation requests are inert
-    /// (E6-1) and reads without data yield
+    /// and reads without data yield
     /// [`FetchError::NoFetcher`](crate::FetchError::NoFetcher); the first
     /// `fetch`/`subscribe` that supplies a fetcher makes them live.
     pub fn observe<K, T, E>(&self, key: K, opts: QueryOptions) -> QueryHandle<T, E>
@@ -366,11 +366,11 @@ impl SwrClient {
         self.subscribe_inner(key.into_query_key(), None, opts, None)
     }
 
-    /// [`SwrClient::subscribe`] with structural sharing (D-30): commits whose
+    /// [`SwrClient::subscribe`] with structural sharing: commits whose
     /// value equals the cached one (per `T: PartialEq`) keep the existing
     /// `Arc`. A subscriber can then skip rebuilding downstream views with an
     /// O(1) [`Arc::ptr_eq`] check on the snapshot data. Notifications still
-    /// fire on every commit (CMP-1); only the `Arc` identity is stabilized.
+    /// fire on every commit; only the `Arc` identity is stabilized.
     pub fn subscribe_eq<K, T, E, F>(
         &self,
         key: K,
@@ -415,8 +415,8 @@ impl SwrClient {
     }
 
     /// Synchronous local write — SWR's `mutate(key, data, { revalidate: false })`.
-    /// Counts as fresh, authoritative data (D-7) and discards any in-flight
-    /// request for the key (SEQ-3).
+    /// Counts as fresh, authoritative data and discards any in-flight
+    /// request for the key.
     pub fn set<K, T, E>(&self, key: K, value: T)
     where
         K: IntoQueryKey<T, E>,
@@ -432,11 +432,11 @@ impl SwrClient {
         );
     }
 
-    /// Async mutation; optimistic updates go through here (E10/E11).
+    /// Async mutation; optimistic updates go through here.
     ///
-    /// While the mutation runs, fetch commits for the key are discarded (D-6).
+    /// While the mutation runs, fetch commits for the key are discarded.
     /// If this future is dropped before `fut` completes, the mutation is
-    /// aborted: the optimistic write rolls back per SEQ-4 and the entry
+    /// aborted: the optimistic write rolls back (unless overwritten meanwhile) and the entry
     /// revalidates per `opts.revalidate`.
     pub async fn mutate<K, T, E, Fut>(
         &self,
@@ -495,7 +495,7 @@ impl SwrClient {
         ret
     }
 
-    /// Mark every entry under `prefix` stale (E12, K-2). Active entries
+    /// Mark every entry under `prefix` stale. Active entries
     /// refetch immediately; idle ones refetch on their next read.
     pub fn invalidate(&self, prefix: impl IntoKeyPrefix) {
         Shared::dispatch(
@@ -506,7 +506,8 @@ impl SwrClient {
         );
     }
 
-    /// Request a revalidation for one key (E6; deduplicated).
+    /// Request a revalidation for one key (deduplicated against in-flight
+    /// requests).
     pub fn revalidate<K, T, E>(&self, key: K)
     where
         K: IntoQueryKey<T, E>,
@@ -517,7 +518,7 @@ impl SwrClient {
     }
 
     /// [`revalidate`](SwrClient::revalidate) for an already-built
-    /// [`QueryKey`] (D-36) — for adapters and callers that only hold the
+    /// [`QueryKey`] — for adapters and callers that only hold the
     /// erased key. Safe without type parameters: revalidation never touches
     /// typed values.
     pub fn revalidate_key(&self, key: QueryKey) {
@@ -525,7 +526,7 @@ impl SwrClient {
     }
 
     /// Feed an environment event (browser focus, connectivity, ...) from the
-    /// host (E13).
+    /// host.
     pub fn broadcast(&self, ev: SwrEvent) {
         Shared::dispatch(&self.shared, Event::Broadcast { ev });
     }
@@ -535,7 +536,7 @@ impl SwrClient {
         &self.shared.defaults
     }
 
-    /// Test hook: force-remove an entry, simulating a completed GC (IT2).
+    /// Test hook: force-remove an entry, simulating a completed GC.
     #[cfg(test)]
     pub(crate) fn force_remove(&self, key: &QueryKey) {
         self.shared.force_remove(key);

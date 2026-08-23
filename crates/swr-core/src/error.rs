@@ -4,10 +4,10 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
-/// Error returned by [`SwrClient::fetch`](crate::SwrClient::fetch) (spec 7.1).
+/// Error returned by [`SwrClient::fetch`](crate::SwrClient::fetch).
 #[derive(Debug)]
 pub enum FetchError<E> {
-    /// The fetcher failed; carries the typed error as `Arc<E>` (TE-2).
+    /// The fetcher failed; carries the typed error as `Arc<E>`.
     Fetch(Arc<E>),
     /// The entry has no fetcher to run. Non-`CacheOnly` reads require one.
     NoFetcher,
@@ -35,7 +35,7 @@ impl<E: Error + 'static> Error for FetchError<E> {
 }
 
 /// The watched entry was garbage-collected and its channel closed; re-subscribe
-/// to keep observing the key (spec 7.2).
+/// to keep observing the key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Closed;
 

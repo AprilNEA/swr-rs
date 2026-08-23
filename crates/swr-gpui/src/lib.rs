@@ -1,4 +1,4 @@
-//! GPUI adapter for swr (spec M7, D-35).
+//! GPUI adapter for swr.
 //!
 //! Two pieces:
 //!
@@ -10,7 +10,7 @@
 //!   latest [`QueryState`]; a foreground watcher task keeps it fresh and
 //!   calls `cx.notify()` on every change, so views observe a query exactly
 //!   like any other entity ([`gpui::App::observe`]) and read it lock-free
-//!   during render (SNAP-1).
+//!   during render.
 //!
 //! ```ignore
 //! struct StatusView { query: Query<Status, ApiError> }
@@ -49,7 +49,7 @@ use swr_core::{
 ///
 /// Time goes through the executor's clock, so
 /// [`advance_clock`](BackgroundExecutor::advance_clock) moves staleness, GC,
-/// and refresh timers in tests (RT-1).
+/// and refresh timers in tests.
 #[derive(Clone)]
 pub struct GpuiRuntime {
     executor: BackgroundExecutor,
@@ -77,7 +77,7 @@ impl Runtime for GpuiRuntime {
 
     fn spawn(&self, fut: RuntimeFuture) {
         // GPUI tasks cancel on drop; swr's fetches and timers are detached
-        // by contract (D-3).
+        // by contract.
         self.executor.spawn(fut).detach();
     }
 
@@ -123,7 +123,7 @@ where
         let watcher = cx.spawn(async move |cx| {
             let mut handle = handle;
             // Closed only happens once the entry is gone; a live subscription
-            // pins it (E14 requires zero subscribers), so ending is correct.
+            // pins it (GC skips subscribed entries), so ending is correct.
             while handle.changed().await.is_ok() {
                 let snapshot = handle.snapshot();
                 let updated = weak_state.update(cx, |state, cx| {
@@ -148,12 +148,12 @@ where
         &self.state
     }
 
-    /// Read the current state (lock-free; render-path safe, SNAP-1).
+    /// Read the current state (lock-free; render-path safe).
     pub fn read<'a>(&self, cx: &'a App) -> &'a QueryState<T, E> {
         self.state.read(cx)
     }
 
-    /// Request a revalidation (E6; deduplicated against in-flight requests).
+    /// Request a revalidation (deduplicated against in-flight requests).
     pub fn revalidate(&self) {
         if let Some(client) = self.client.upgrade() {
             client.revalidate_key(self.key.clone());

@@ -37,7 +37,7 @@ jobs:
           cargo clippy -p swr-runtime-web --target wasm32-unknown-unknown --all-targets -- -D warnings
 
   wasm-test:
-    name: IT5 wasm smoke
+    name: wasm smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

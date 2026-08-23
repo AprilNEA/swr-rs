@@ -1,4 +1,4 @@
-//! The typed [`Fetcher`] trait and its erasure into the stored form (spec 7.3).
+//! The typed [`Fetcher`] trait and its erasure into the stored form.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -7,11 +7,11 @@ use crate::erased::{BoxedFuture, ErasedFetcher, ErasedValue};
 use crate::key::QueryKey;
 use crate::marker::{MaybeSend, MaybeSync};
 
-/// A typed fetcher (spec 7.3). Any `Fn(K) -> impl Future<Output = Result<T, E>>`
+/// A typed fetcher. Any `Fn(K) -> impl Future<Output = Result<T, E>>`
 /// closure implements it via the blanket impl, so plain closures like
 /// `|id| async move { api.load(id).await }` work directly.
 ///
-/// API-2: the fetcher provided to each `fetch()`/`subscribe()` call replaces
+/// The fetcher provided to each `fetch()`/`subscribe()` call replaces
 /// the stored one (last-wins). Using fetchers with different behavior for the
 /// same key is a caller error the library does not detect.
 pub trait Fetcher<K, T, E>: MaybeSend + MaybeSync + 'static {
@@ -34,7 +34,7 @@ where
     }
 }
 
-/// API-1: wrap a typed fetcher into the type-erased, `Arc`-ified form stored
+/// Wrap a typed fetcher into the type-erased, `Arc`-ified form stored
 /// per entry. The typed key is captured here; the stored `QueryKey` argument
 /// is ignored.
 pub(crate) fn erase<K, T, E, F>(key: K, fetcher: F) -> ErasedFetcher

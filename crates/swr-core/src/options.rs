@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-/// Read policy for [`SwrClient::fetch`](crate::SwrClient::fetch) (spec 7.1).
+/// Read policy for [`SwrClient::fetch`](crate::SwrClient::fetch).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ReadPolicy {
     /// Return stale data immediately and refresh in the background; with no
@@ -16,22 +16,21 @@ pub enum ReadPolicy {
     CacheOnly,
 }
 
-/// Per-query options. Active subscribers' options are aggregated per entry
-/// (OPT-1..OPT-4).
+/// Per-query options, aggregated across an entry's active subscribers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueryOptions {
-    /// Freshness window (OPT-1). Absorbs SWR's `dedupingInterval` (D-4).
+    /// Freshness window. Absorbs SWR's `dedupingInterval`.
     /// Default: 2 seconds.
     pub stale_time: Duration,
-    /// Delay before an idle entry is garbage-collected (OPT-2). Default: 300 seconds.
+    /// Delay before an idle entry is garbage-collected. Default: 300 seconds.
     pub gc_time: Duration,
-    /// Background refresh interval while subscribed (OPT-3). Default: `None`.
+    /// Background refresh interval while subscribed. Default: `None`.
     pub refresh_interval: Option<Duration>,
-    /// Revalidate stale entries on [`SwrEvent::Focus`] broadcasts (OPT-4). Default: `true`.
+    /// Revalidate stale entries on [`SwrEvent::Focus`] broadcasts. Default: `true`.
     pub revalidate_on_focus: bool,
-    /// Revalidate stale entries on [`SwrEvent::Online`] broadcasts (OPT-4). Default: `true`.
+    /// Revalidate stale entries on [`SwrEvent::Online`] broadcasts. Default: `true`.
     pub revalidate_on_online: bool,
-    /// Minimum spacing between focus-triggered revalidations (OPT-5; SWR's
+    /// Minimum spacing between focus-triggered revalidations (SWR's
     /// `focusThrottleInterval`). Online broadcasts are not throttled.
     /// Default: 5 seconds.
     pub focus_throttle: Duration,
@@ -64,17 +63,17 @@ impl QueryOptions {
     }
 }
 
-/// Options for [`SwrClient::mutate`](crate::SwrClient::mutate) (spec 7.1).
+/// Options for [`SwrClient::mutate`](crate::SwrClient::mutate).
 #[derive(Debug)]
 pub struct MutateOptions<T> {
-    /// Optimistic value written before the mutation future runs (E10).
+    /// Optimistic value written before the mutation future runs.
     pub optimistic: Option<T>,
     /// On error, roll the optimistic write back unless something else wrote in
-    /// between (SEQ-4). Default: `true`.
+    /// between. Default: `true`.
     pub rollback_on_error: bool,
     /// Write an `Ok(Some(v))` mutation result into the cache. Default: `true`.
     pub populate: bool,
-    /// Revalidate once the last concurrent mutation finishes (E11 step 3).
+    /// Revalidate once the last concurrent mutation finishes.
     /// Default: `true`.
     pub revalidate: bool,
 }
@@ -91,7 +90,7 @@ impl<T> Default for MutateOptions<T> {
 }
 
 /// Environment events fed by the host via
-/// [`SwrClient::broadcast`](crate::SwrClient::broadcast) (E13).
+/// [`SwrClient::broadcast`](crate::SwrClient::broadcast).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SwrEvent {
     /// The window or application regained focus.
