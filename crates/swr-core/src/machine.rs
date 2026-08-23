@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 use crate::Instant;
-use crate::erased::{ErasedFetcher, ErasedValue};
+use crate::erased::{ErasedCompare, ErasedFetcher, ErasedValue};
 use crate::key::{QueryKey, Segment};
 use crate::options::{MutateFlags, QueryOptions, ReadPolicy, SwrEvent};
 use crate::snapshot::Snapshot;
@@ -49,12 +49,18 @@ pub(crate) enum Event {
         key: QueryKey,
         policy: ReadPolicy,
         fetcher: Option<ErasedFetcher>,
+        /// Structural-sharing comparator (D-30); a provided one replaces the
+        /// stored one, `None` leaves it untouched.
+        compare: Option<ErasedCompare>,
         opts: QueryOptions,
     },
     /// A `QueryHandle` is being created.
     Subscribe {
         key: QueryKey,
         fetcher: ErasedFetcher,
+        /// Structural-sharing comparator (D-30); a provided one replaces the
+        /// stored one, `None` leaves it untouched.
+        compare: Option<ErasedCompare>,
         opts: QueryOptions,
     },
     /// A `QueryHandle` was dropped. `sub_id` identifies which subscriber's
@@ -288,6 +294,9 @@ struct EntryCore {
 
     // ---- behavior ----
     fetcher: Option<ErasedFetcher>,
+    /// Structural-sharing comparator (D-30, CMP-1): decides only whether the
+    /// stored `Arc` is kept on an equal commit; never affects seq or notify.
+    compare: Option<ErasedCompare>,
     opts: EntryOptions,
 
     // ---- notification ----
@@ -316,6 +325,7 @@ impl EntryCore {
             refresh_gen: 0,
             focus_blocked_until: None,
             fetcher: None,
+            compare: None,
             opts: EntryOptions::default(),
             snap_version: 0,
             tx: Arc::new(tx),
@@ -465,11 +475,15 @@ impl Inner {
                 key,
                 policy,
                 fetcher,
+                compare,
                 opts,
-            } => self.on_read(key, policy, fetcher, opts, now, &mut ctx),
-            Event::Subscribe { key, fetcher, opts } => {
-                self.on_subscribe(key, fetcher, opts, now, &mut ctx)
-            }
+            } => self.on_read(key, policy, fetcher, compare, opts, now, &mut ctx),
+            Event::Subscribe {
+                key,
+                fetcher,
+                compare,
+                opts,
+            } => self.on_subscribe(key, fetcher, compare, opts, now, &mut ctx),
             Event::Unsubscribe { key, sub_id } => {
                 self.on_unsubscribe(&key, sub_id, &mut ctx);
                 Outcome::None
@@ -534,11 +548,16 @@ impl Inner {
     }
 
     /// E1 / E2 / E3.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors the Event::Read payload; splitting it would obscure the E1-E3 tables"
+    )]
     fn on_read(
         &mut self,
         key: QueryKey,
         policy: ReadPolicy,
         fetcher: Option<ErasedFetcher>,
+        compare: Option<ErasedCompare>,
         opts: QueryOptions,
         now: Instant,
         ctx: &mut Ctx,
@@ -552,6 +571,9 @@ impl Inner {
             if let Some(f) = fetcher {
                 e.fetcher = Some(f);
             }
+            if let Some(c) = compare {
+                e.compare = Some(c);
+            }
             e.opts.last_touch_gc_time = Some(opts.gc_time);
             ctx.mark_touched(&key);
             return Outcome::Read(ReadOutcome::Ready(e.snapshot_now()));
@@ -564,6 +586,9 @@ impl Inner {
             .or_insert_with(EntryCore::new);
         if let Some(f) = fetcher {
             e.fetcher = Some(f);
+        }
+        if let Some(c) = compare {
+            e.compare = Some(c);
         }
         e.opts.last_touch_gc_time = Some(opts.gc_time);
         ctx.mark_touched(&key);
@@ -647,6 +672,7 @@ impl Inner {
         &mut self,
         key: QueryKey,
         fetcher: ErasedFetcher,
+        compare: Option<ErasedCompare>,
         opts: QueryOptions,
         now: Instant,
         ctx: &mut Ctx,
@@ -659,6 +685,9 @@ impl Inner {
             .or_insert_with(EntryCore::new);
         ctx.mark_touched(&key);
         e.fetcher = Some(fetcher);
+        if let Some(c) = compare {
+            e.compare = Some(c);
+        }
         e.opts.last_touch_gc_time = Some(opts.gc_time);
         let stale = e.is_stale(opts.stale_time, now);
         e.opts.subs.insert(sub_id, opts);
@@ -740,7 +769,20 @@ impl Inner {
             !e.invalidated,
             "INV-A: invalidated must be false on the commit-apply path"
         );
-        e.data = Some(value);
+        // D-30 / CMP-1: structural sharing. When a comparator says the new
+        // value equals the current one, keep the old `Arc` (so subscribers can
+        // detect no-change via `Arc::ptr_eq`) and drop the new allocation.
+        // Everything else — data_seq, updated_at, the notify — advances
+        // exactly as without a comparator; skipping the notify would strand
+        // EnsureFresh waiters (WAIT-1, D-11).
+        let unchanged = e
+            .compare
+            .as_ref()
+            .zip(e.data.as_ref())
+            .is_some_and(|(compare, old)| compare(old, &value));
+        if !unchanged {
+            e.data = Some(value);
+        }
         e.data_seq = seq;
         e.updated_at = Some(now);
         e.error = None;

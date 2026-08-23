@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::*;
-use crate::erased::BoxedFuture;
+use crate::erased::{BoxedFuture, erased_eq};
 
 fn test_fetcher() -> ErasedFetcher {
     Arc::new(|_key: QueryKey| {
@@ -110,6 +110,7 @@ impl Machine {
             key: key.clone(),
             policy,
             fetcher: Some(test_fetcher()),
+            compare: None,
             opts: QueryOptions::default(),
         })
     }
@@ -118,6 +119,7 @@ impl Machine {
         let out = self.handle(Event::Subscribe {
             key: key.clone(),
             fetcher: test_fetcher(),
+            compare: None,
             opts,
         });
         let Outcome::Subscribed { sub_id, .. } = out.outcome else {
@@ -699,6 +701,7 @@ fn t16_immutable_options() {
         key: k.clone(),
         policy: ReadPolicy::StaleWhileRevalidate,
         fetcher: Some(test_fetcher()),
+        compare: None,
         opts: QueryOptions::immutable(),
     });
     assert!(
@@ -722,4 +725,77 @@ fn t16_immutable_options() {
         1,
         "manual revalidate works"
     );
+}
+
+/// D-30 / CMP-1 (a)(c): an equal commit keeps the stored `Arc` while seq,
+/// updated_at, and the notify all advance; an unequal commit replaces it.
+#[test]
+fn t17_structural_sharing_keeps_the_arc_on_equal_commits() {
+    let mut m = Machine::new();
+    let k = key("a");
+    let out = m.handle(Event::Subscribe {
+        key: k.clone(),
+        fetcher: test_fetcher(),
+        compare: Some(erased_eq::<u32>()),
+        opts: QueryOptions {
+            stale_time: Duration::ZERO,
+            ..QueryOptions::default()
+        },
+    });
+    assert_eq!(start_fetch_seqs(&out.effects), [1]);
+    m.commit_ok(&k, 1, 5);
+    let first = m.entry(&k).data.clone().expect("data");
+    let first_at = m.entry(&k).updated_at;
+
+    m.advance(Duration::from_secs(1));
+    let out = m.handle(Event::RevalidateRequested { key: k.clone() });
+    assert_eq!(start_fetch_seqs(&out.effects), [2]);
+    let out = m.commit_ok(&k, 2, 5); // equal content
+    assert_eq!(
+        notify_count(&out.effects),
+        1,
+        "CMP-1: equal commits still notify"
+    );
+
+    let e = m.entry(&k);
+    assert!(
+        Arc::ptr_eq(&first, e.data.as_ref().expect("data")),
+        "old Arc kept on equal commit"
+    );
+    assert_eq!(e.data_seq, 2, "seq advances regardless");
+    assert_ne!(e.updated_at, first_at, "freshness renewed regardless");
+
+    // (c) an unequal commit replaces the value as usual.
+    m.handle(Event::RevalidateRequested { key: k.clone() });
+    m.commit_ok(&k, 3, 6);
+    let e = m.entry(&k);
+    assert!(!Arc::ptr_eq(&first, e.data.as_ref().expect("data")));
+    assert_eq!(m.data_u32(&k), Some(6));
+    assert_eq!(e.data_seq, 3);
+}
+
+/// D-30 (d): without a comparator, equal commits replace the `Arc` exactly as
+/// before — no behavior change for existing callers.
+#[test]
+fn t18_no_comparator_replaces_the_arc() {
+    let mut m = Machine::new();
+    let k = key("a");
+    m.subscribe(
+        &k,
+        QueryOptions {
+            stale_time: Duration::ZERO,
+            ..QueryOptions::default()
+        },
+    );
+    m.commit_ok(&k, 1, 5);
+    let first = m.entry(&k).data.clone().expect("data");
+
+    m.handle(Event::RevalidateRequested { key: k.clone() });
+    m.commit_ok(&k, 2, 5); // equal content, no comparator
+    let e = m.entry(&k);
+    assert!(
+        !Arc::ptr_eq(&first, e.data.as_ref().expect("data")),
+        "no comparator: the new Arc replaces the old one"
+    );
+    assert_eq!(e.data_seq, 2);
 }

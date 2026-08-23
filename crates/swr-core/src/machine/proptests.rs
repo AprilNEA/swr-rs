@@ -155,11 +155,13 @@ proptest! {
                         _ => ReadPolicy::CacheOnly,
                     },
                     fetcher: Some(test_fetcher()),
+                    compare: None,
                     opts: QueryOptions::default(),
                 },
                 Op::Subscribe => Event::Subscribe {
                     key: k.clone(),
                     fetcher: test_fetcher(),
+                    compare: None,
                     opts: QueryOptions::default(),
                 },
                 Op::Unsubscribe(p) => match pick(&mut subs, p) {

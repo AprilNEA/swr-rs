@@ -34,6 +34,34 @@ pub(crate) type ErasedFetcher =
 pub(crate) type ErasedFetcher =
     Arc<dyn Fn(QueryKey) -> BoxedFuture<Result<ErasedValue, ErasedValue>>>;
 
+/// Type-erased value comparator for structural sharing (D-30). Stored per
+/// entry; last provider wins, a call without one leaves the stored comparator
+/// untouched.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type ErasedCompare = Arc<dyn Fn(&ErasedValue, &ErasedValue) -> bool + Send + Sync>;
+/// Type-erased value comparator for structural sharing (D-30). Stored per
+/// entry; last provider wins, a call without one leaves the stored comparator
+/// untouched.
+#[cfg(target_arch = "wasm32")]
+pub(crate) type ErasedCompare = Arc<dyn Fn(&ErasedValue, &ErasedValue) -> bool>;
+
+/// Wrap `T: PartialEq` into an [`ErasedCompare`]. Both sides come from the
+/// same entry, so K-1 guarantees the downcasts succeed (TE-1).
+pub(crate) fn erased_eq<T>() -> ErasedCompare
+where
+    T: PartialEq + MaybeSend + MaybeSync + 'static,
+{
+    Arc::new(|a, b| {
+        let a = a
+            .downcast_ref::<T>()
+            .expect("swr-core internal bug (TE-1): comparator value type mismatch");
+        let b = b
+            .downcast_ref::<T>()
+            .expect("swr-core internal bug (TE-1): comparator value type mismatch");
+        a == b
+    })
+}
+
 /// TE-1: downcast at the typed boundary. The `(T, E)` type id is part of the
 /// key (K-1), so a mismatch is impossible without an internal bug.
 #[cfg(not(target_arch = "wasm32"))]

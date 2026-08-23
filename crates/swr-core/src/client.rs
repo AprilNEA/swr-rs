@@ -7,7 +7,7 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use tokio::sync::watch;
 
-use crate::erased::{ErasedValue, downcast_value};
+use crate::erased::{ErasedCompare, ErasedValue, downcast_value, erased_eq};
 use crate::error::FetchError;
 use crate::fetcher::{self, Fetcher};
 use crate::handle::QueryHandle;
@@ -169,6 +169,43 @@ impl SwrClient {
         E: MaybeSend + MaybeSync + 'static,
         F: Fetcher<K, T, E>,
     {
+        self.fetch_inner(key, fetcher, policy, None).await
+    }
+
+    /// [`SwrClient::fetch`] with structural sharing (D-30): commits whose
+    /// value equals the cached one (per `T: PartialEq`) keep the existing
+    /// `Arc`, so consumers can detect "content unchanged" with
+    /// [`Arc::ptr_eq`]. Freshness, seq progression, and notifications are
+    /// unaffected (CMP-1).
+    pub async fn fetch_eq<K, T, E, F>(
+        &self,
+        key: K,
+        fetcher: F,
+        policy: ReadPolicy,
+    ) -> Result<Arc<T>, FetchError<E>>
+    where
+        K: IntoQueryKey<T, E> + Clone + MaybeSend + MaybeSync + 'static,
+        T: PartialEq + MaybeSend + MaybeSync + 'static,
+        E: MaybeSend + MaybeSync + 'static,
+        F: Fetcher<K, T, E>,
+    {
+        self.fetch_inner(key, fetcher, policy, Some(erased_eq::<T>()))
+            .await
+    }
+
+    async fn fetch_inner<K, T, E, F>(
+        &self,
+        key: K,
+        fetcher: F,
+        policy: ReadPolicy,
+        compare: Option<ErasedCompare>,
+    ) -> Result<Arc<T>, FetchError<E>>
+    where
+        K: IntoQueryKey<T, E> + Clone + MaybeSend + MaybeSync + 'static,
+        T: MaybeSend + MaybeSync + 'static,
+        E: MaybeSend + MaybeSync + 'static,
+        F: Fetcher<K, T, E>,
+    {
         let query_key = key.clone().into_query_key();
         let erased = fetcher::erase(key, fetcher);
         loop {
@@ -178,6 +215,7 @@ impl SwrClient {
                     key: query_key.clone(),
                     policy,
                     fetcher: Some(erased.clone()),
+                    compare: compare.clone(),
                     opts: self.shared.defaults.clone(),
                 },
             );
@@ -258,6 +296,42 @@ impl SwrClient {
         E: MaybeSend + MaybeSync + 'static,
         F: Fetcher<K, T, E>,
     {
+        self.subscribe_inner(key, fetcher, opts, None)
+    }
+
+    /// [`SwrClient::subscribe`] with structural sharing (D-30): commits whose
+    /// value equals the cached one (per `T: PartialEq`) keep the existing
+    /// `Arc`. A subscriber can then skip rebuilding downstream views with an
+    /// O(1) [`Arc::ptr_eq`] check on the snapshot data. Notifications still
+    /// fire on every commit (CMP-1); only the `Arc` identity is stabilized.
+    pub fn subscribe_eq<K, T, E, F>(
+        &self,
+        key: K,
+        fetcher: F,
+        opts: QueryOptions,
+    ) -> QueryHandle<T, E>
+    where
+        K: IntoQueryKey<T, E> + Clone + MaybeSend + MaybeSync + 'static,
+        T: PartialEq + MaybeSend + MaybeSync + 'static,
+        E: MaybeSend + MaybeSync + 'static,
+        F: Fetcher<K, T, E>,
+    {
+        self.subscribe_inner(key, fetcher, opts, Some(erased_eq::<T>()))
+    }
+
+    fn subscribe_inner<K, T, E, F>(
+        &self,
+        key: K,
+        fetcher: F,
+        opts: QueryOptions,
+        compare: Option<ErasedCompare>,
+    ) -> QueryHandle<T, E>
+    where
+        K: IntoQueryKey<T, E> + Clone + MaybeSend + MaybeSync + 'static,
+        T: MaybeSend + MaybeSync + 'static,
+        E: MaybeSend + MaybeSync + 'static,
+        F: Fetcher<K, T, E>,
+    {
         let query_key = key.clone().into_query_key();
         let erased = fetcher::erase(key, fetcher);
         let outcome = Shared::dispatch(
@@ -265,6 +339,7 @@ impl SwrClient {
             Event::Subscribe {
                 key: query_key.clone(),
                 fetcher: erased,
+                compare,
                 opts,
             },
         );

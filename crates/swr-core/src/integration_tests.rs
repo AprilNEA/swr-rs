@@ -560,3 +560,63 @@ async fn retry_if_skips_non_retryable_errors() {
     assert!(result.is_err());
     assert_eq!(calls.load(Ordering::SeqCst), 1, "no retry for fatal errors");
 }
+
+/// D-30 / CMP-1 (b): an equal commit must still wake EnsureFresh waiters —
+/// structural sharing keeps the Arc but never suppresses the notify.
+#[tokio::test(start_paused = true)]
+async fn equal_commit_still_wakes_ensure_fresh_waiters() {
+    let client = client();
+    let constant = |_key: &'static str| std::future::ready(Ok::<u32, String>(42));
+
+    let first = client
+        .fetch_eq("k", constant, ReadPolicy::EnsureFresh)
+        .await
+        .expect("first load");
+
+    tokio::time::sleep(Duration::from_secs(3)).await; // past stale_time
+
+    // The stale EnsureFresh read starts a new flight whose result is equal.
+    // If the equal commit skipped its notify, this would hang until the
+    // timeout below fires.
+    let second = tokio::time::timeout(
+        Duration::from_secs(30),
+        client.fetch_eq("k", constant, ReadPolicy::EnsureFresh),
+    )
+    .await
+    .expect("waiter woken by the equal commit (CMP-1)")
+    .expect("refresh succeeds");
+
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "structural sharing kept the Arc across the refresh"
+    );
+}
+
+/// D-30: subscribe_eq exposes the stable Arc through snapshots, giving
+/// subscribers an O(1) no-change check.
+#[tokio::test(start_paused = true)]
+async fn subscribe_eq_stabilizes_snapshot_arcs() {
+    let client = client();
+    let constant = |_key: &'static str| std::future::ready(Ok::<u32, String>(7));
+    let mut handle = client.subscribe_eq::<_, u32, String, _>(
+        "k",
+        constant,
+        QueryOptions {
+            stale_time: Duration::ZERO,
+            ..QueryOptions::default()
+        },
+    );
+    wait_for(&mut handle, 7).await;
+    let first = handle.snapshot().data.expect("loaded");
+
+    handle.revalidate();
+    loop {
+        let state = handle.snapshot();
+        if !state.is_validating {
+            let second = state.data.expect("still loaded");
+            assert!(Arc::ptr_eq(&first, &second), "equal refresh kept the Arc");
+            break;
+        }
+        handle.changed().await.expect("channel open");
+    }
+}
