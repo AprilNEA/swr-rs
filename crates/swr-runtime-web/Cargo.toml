@@ -1,0 +1,20 @@
+[package]
+name = "swr-runtime-web"
+description = "Browser (wasm32) implementation of the swr-core Runtime trait with focus/online event sources"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# All dependencies are wasm32-only; on native targets the crate compiles to an
+# empty library (see the crate-level #![cfg]).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+swr-core.workspace = true
+gloo-events = "0.3.0"
+gloo-timers = { version = "0.4.0", features = ["futures"] }
+wasm-bindgen = "0.2.127"
+wasm-bindgen-futures = "0.4.77"
+web-sys = { version = "0.3.104", features = ["Window", "Document", "Event", "EventTarget", "VisibilityState"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3.77"

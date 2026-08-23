@@ -27,4 +27,23 @@ jobs:
       - name: Check (native)
         run: cargo check --workspace
       - name: Check (wasm32)
-        run: cargo check -p swr-core --target wasm32-unknown-unknown
+        run: cargo check -p swr-core -p swr-runtime-web --target wasm32-unknown-unknown
+      - name: Clippy (wasm32)
+        # swr-core lib only: its dev-dependencies (proptest) are native-only.
+        run: |
+          cargo clippy -p swr-core --target wasm32-unknown-unknown -- -D warnings
+          cargo clippy -p swr-runtime-web --target wasm32-unknown-unknown --all-targets -- -D warnings
+
+  wasm-test:
+    name: IT5 wasm smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Run wasm tests (headless Chrome)
+        run: wasm-pack test --headless --chrome crates/swr-runtime-web

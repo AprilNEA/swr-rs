@@ -21,6 +21,14 @@
 //! # async fn load_user(_id: u64) -> Result<String, String> { Ok(String::new()) }
 //! ```
 #![deny(missing_docs)]
+#![cfg_attr(
+    target_arch = "wasm32",
+    allow(
+        clippy::arc_with_non_send_sync,
+        reason = "wasm is single-threaded: MaybeSend deliberately relaxes Send there (spec 3.2), \
+                  and Arc keeps one code path across native and wasm targets"
+    )
+)]
 
 mod client;
 mod erased;

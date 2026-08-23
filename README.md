@@ -14,6 +14,10 @@ deviations are tracked in its D-x table and in
 - `swr-core` — state machine, cache, and the public client API. Compiles on
   native and `wasm32-unknown-unknown`.
 - `swr-runtime-tokio` — tokio `Runtime` implementation for native targets.
+- `swr-runtime-web` — browser `Runtime` (`spawn_local` + `setTimeout` timers)
+  plus a reference-counted focus/online event source (`WebEventSource::attach`
+  forwards `focus`/`visibilitychange`/`online` to `SwrClient::broadcast`).
+  wasm32-only; an empty crate on native targets.
 
 ## Usage
 
@@ -54,5 +58,10 @@ cargo run -p swr-runtime-tokio --example bff
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo check -p swr-core --target wasm32-unknown-unknown
+cargo check -p swr-core -p swr-runtime-web --target wasm32-unknown-unknown
+
+# wasm smoke tests (IT5); needs wasm-bindgen-cli matching the locked
+# wasm-bindgen version, plus Node for smoke.rs / a browser for browser.rs
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+  cargo test -p swr-runtime-web --target wasm32-unknown-unknown --test smoke
 ```
